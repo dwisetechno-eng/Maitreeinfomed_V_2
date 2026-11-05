@@ -122,9 +122,9 @@ export function AppShell({ user, children }: { user?: AppUser | null; children: 
     }
   }
 
-  // The login screen renders its own full-page layout without the workspace
-  // chrome. All hooks above still run on every route.
-  if (pathname === '/login') {
+  // The authentication screens render their own full-page layouts without the
+  // workspace chrome. All hooks above still run on every route.
+  if (pathname === '/login' || pathname === '/reset-password') {
     return <>{children}</>
   }
 

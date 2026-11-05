@@ -6,6 +6,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
+    "create-admin": "node scripts/create-admin.mjs",
     "deploy": "npm run build && git add . && git commit -m \"Update and deploy to Vercel\" && git push origin main"
 
   },
