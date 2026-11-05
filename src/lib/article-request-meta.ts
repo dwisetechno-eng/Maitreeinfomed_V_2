@@ -14,6 +14,8 @@ export type ArticleRequestMeta = {
   rate: number
   vendorName?: string
   remarks?: string
+  batchId?: string
+  batchTag?: string
 }
 
 export function encodeArticleRequestNotes(meta: ArticleRequestMeta): string {
@@ -22,6 +24,8 @@ export function encodeArticleRequestNotes(meta: ArticleRequestMeta): string {
     rate: meta.rate,
     vendorName: meta.vendorName ?? null,
     remarks: meta.remarks ?? null,
+    batchId: meta.batchId ?? null,
+    batchTag: meta.batchTag ?? null,
   })}`
 }
 
@@ -38,6 +42,8 @@ export function parseArticleRequestMeta(
       rate?: unknown
       vendorName?: unknown
       remarks?: unknown
+      batchId?: unknown
+      batchTag?: unknown
     }
 
     return {
@@ -45,6 +51,8 @@ export function parseArticleRequestMeta(
       rate: typeof parsed.rate === 'number' && Number.isFinite(parsed.rate) ? parsed.rate : 0,
       vendorName: typeof parsed.vendorName === 'string' ? parsed.vendorName : undefined,
       remarks: typeof parsed.remarks === 'string' ? parsed.remarks : undefined,
+      batchId: typeof parsed.batchId === 'string' ? parsed.batchId : undefined,
+      batchTag: typeof parsed.batchTag === 'string' ? parsed.batchTag : undefined,
     }
   } catch {
     return null
@@ -67,6 +75,8 @@ export type ArticleRequestRow = {
   article_description?: string | null
   rate?: number | null
   cost_price?: number | null
+  batch_id?: string | null
+  batch_tag?: string | null
 }
 
 export function getArticleTitle(row: ArticleRequestRow): string {
@@ -111,4 +121,22 @@ export function getArticleQuantity(row: ArticleRequestRow): number {
   }
 
   return 1
+}
+
+/** Batch id stored in the native column or the structured notes fallback. */
+export function getArticleBatchId(row: ArticleRequestRow): string | null {
+  if (row.batch_id?.trim()) {
+    return row.batch_id.trim()
+  }
+
+  return parseArticleRequestMeta(row.notes)?.batchId ?? null
+}
+
+/** Human readable batch tag, if the import provided one. */
+export function getArticleBatchTag(row: ArticleRequestRow): string | null {
+  if (row.batch_tag?.trim()) {
+    return row.batch_tag.trim()
+  }
+
+  return parseArticleRequestMeta(row.notes)?.batchTag ?? null
 }

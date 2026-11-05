@@ -29,6 +29,11 @@ export type ImportResult =
       vendorsCreated: string[]
       skipped: ImportSkip[]
       usedFallbackColumns: boolean
+      batchId: string
+      batchTag: string | null
+      clientId: string
+      departmentId: string | null
+      contactId: string | null
     }
   | {
       ok: false
@@ -90,13 +95,31 @@ const HEADER_ALIASES: Record<Field, string[]> = {
   doi: ['doi', 'digitalobjectidentifier'],
 }
 
+/** Columns that are stripped one at a time when a database has not migrated yet. */
+const OPTIONAL_IMPORT_COLUMNS = [
+  'article_title',
+  'rate',
+  'batch_id',
+  'batch_tag',
+  'contact_id',
+  'department_id',
+] as const
+
 const MAX_IMPORT_ROWS = 2000
 const MAX_FILE_BYTES = 8 * 1024 * 1024
 
-export async function importArticlesToProforma(formData: FormData): Promise<ImportResult> {
+/**
+ * Import an Excel workbook as one article-request batch for a client.
+ *
+ * Every row shares a freshly generated `batch_id`, so the proforma dialog can
+ * offer "select entire unbilled batch" without any extra bookkeeping.
+ */
+export async function importArticleBatch(formData: FormData): Promise<ImportResult> {
   const file = formData.get('file')
   const clientId = String(formData.get('clientId') ?? '').trim()
   const departmentId = String(formData.get('departmentId') ?? '').trim()
+  const contactId = String(formData.get('contactId') ?? '').trim()
+  const batchTag = String(formData.get('batchTag') ?? '').trim()
 
   if (!(file instanceof File)) {
     return { ok: false, error: 'Attach an .xlsx file to import.' }
@@ -154,7 +177,7 @@ export async function importArticlesToProforma(formData: FormData): Promise<Impo
     rows = parsed.rows
     skipped = parsed.skipped
   } catch (error) {
-    console.error('Unable to parse proforma import workbook', error)
+    console.error('Unable to parse article request import workbook', error)
     return {
       ok: false,
       error: 'The workbook could not be read. Make sure it is a valid, unprotected .xlsx file.',
@@ -247,20 +270,33 @@ export async function importArticlesToProforma(formData: FormData): Promise<Impo
     initialStatusCode = null
   }
 
+  const batchId = crypto.randomUUID()
+  const normalizedBatchTag = batchTag || null
+
   const meta: ArticleRequestMeta[] = rows.map((row) => ({
     title: row.title,
     rate: row.rate,
     vendorName: row.vendorName ?? undefined,
     remarks: row.remarks ?? undefined,
+    batchId,
+    batchTag: normalizedBatchTag ?? undefined,
   }))
 
-  const baseRows = rows.map((row) => {
+  const insertRows = rows.map((row, index) => {
     const payload: Record<string, unknown> = {
       client_id: clientId,
       department_id: departmentId || null,
+      contact_id: contactId || null,
       vendor_id: row.vendorName ? vendorIds.get(normalizeKey(row.vendorName)) ?? null : null,
+      article_description: row.title,
+      article_title: row.title,
+      cost_price: row.rate,
+      rate: row.rate,
       quantity: row.quantity,
       request_date: row.requestDate ?? today(),
+      notes: encodeArticleRequestNotes(meta[index]),
+      batch_id: batchId,
+      batch_tag: normalizedBatchTag,
     }
 
     if (initialStatusCode) {
@@ -270,32 +306,8 @@ export async function importArticlesToProforma(formData: FormData): Promise<Impo
     return payload
   })
 
-  const richRows = baseRows.map((payload, index) => ({
-    ...payload,
-    article_title: rows[index].title,
-    rate: rows[index].rate,
-    notes: rows[index].remarks,
-  }))
-
-  const fallbackRows = baseRows.map((payload, index) => ({
-    ...payload,
-    notes: encodeArticleRequestNotes(meta[index]),
-  }))
-
   try {
-    let usedFallbackColumns = false
-    let inserted = await supabase
-      .from('article_requests')
-      .insert(richRows)
-      .select('id, notes, quantity')
-
-    if (inserted.error && isMissingColumnError(inserted.error)) {
-      usedFallbackColumns = true
-      inserted = await supabase
-        .from('article_requests')
-        .insert(fallbackRows)
-        .select('id, notes, quantity')
-    }
+    const inserted = await insertWithColumnFallback(supabase, insertRows)
 
     if (inserted.error) {
       await removeVendors(supabase, createdVendorIds)
@@ -305,20 +317,19 @@ export async function importArticlesToProforma(formData: FormData): Promise<Impo
       }
     }
 
-    const insertedRows = (inserted.data ?? []) as { id: string }[]
-
-    if (insertedRows.length !== rows.length) {
+    if (inserted.rows.length !== rows.length) {
       await removeVendors(supabase, createdVendorIds)
       return {
         ok: false,
-        error: 'The import was only partially saved. Please refresh and check the pending requests.',
+        error:
+          'The import was only partially saved. Please refresh and check the article requests.',
       }
     }
 
     return {
       ok: true,
       imported: rows.map((row, index) => ({
-        id: insertedRows[index].id,
+        id: inserted.rows[index].id,
         title: row.title,
         rate: row.rate,
         quantity: row.quantity,
@@ -326,12 +337,103 @@ export async function importArticlesToProforma(formData: FormData): Promise<Impo
       })),
       vendorsCreated,
       skipped,
-      usedFallbackColumns,
+      usedFallbackColumns: inserted.usedFallbackColumns,
+      batchId,
+      batchTag: normalizedBatchTag,
+      clientId,
+      departmentId: departmentId || null,
+      contactId: contactId || null,
     }
   } catch (error) {
     await removeVendors(supabase, createdVendorIds)
     return { ok: false, error: describeError(error, 'Unable to import the article requests.') }
   }
+}
+
+/**
+ * Insert all rows, stripping optional columns from every row when the target
+ * database has not run the latest migration. This keeps the import working
+ * while still storing batch metadata inside `notes`.
+ */
+async function insertWithColumnFallback(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  baseRows: Record<string, unknown>[]
+): Promise<{
+  rows: { id: string }[]
+  error: unknown
+  usedFallbackColumns: boolean
+}> {
+  const rows = baseRows.map((row) => ({ ...row }))
+  let usedFallbackColumns = false
+
+  for (let attempt = 0; attempt < OPTIONAL_IMPORT_COLUMNS.length + 2; attempt += 1) {
+    const { data, error } = await supabase
+      .from('article_requests')
+      .insert(rows)
+      .select('id')
+
+    if (!error) {
+      return {
+        rows: (data ?? []) as { id: string }[],
+        error: null,
+        usedFallbackColumns,
+      }
+    }
+
+    if (!isMissingColumnError(error)) {
+      return { rows: [], error, usedFallbackColumns }
+    }
+
+    const missing = extractMissingColumn(error)
+
+    if (missing && isOptionalImportColumn(missing)) {
+      for (const row of rows) {
+        delete row[missing]
+      }
+      usedFallbackColumns = true
+      continue
+    }
+
+    const fallback = OPTIONAL_IMPORT_COLUMNS.find((column) =>
+      rows.some((row) => column in row)
+    )
+
+    if (!fallback) {
+      return { rows: [], error, usedFallbackColumns }
+    }
+
+    for (const row of rows) {
+      delete row[fallback]
+    }
+    usedFallbackColumns = true
+  }
+
+  return {
+    rows: [],
+    error: new Error('The article requests could not be saved after removing unsupported columns.'),
+    usedFallbackColumns,
+  }
+}
+
+function isOptionalImportColumn(column: string): boolean {
+  return (OPTIONAL_IMPORT_COLUMNS as readonly string[]).includes(column)
+}
+
+function extractMissingColumn(error: unknown): string | null {
+  if (!error || typeof error !== 'object') {
+    return null
+  }
+
+  const message = (error as { message?: string }).message ?? ''
+  const postgresMatch = /column\s+[^\s.]+\.([a-zA-Z0-9_]+)\s+does not exist/i.exec(message)
+
+  if (postgresMatch) {
+    return postgresMatch[1]
+  }
+
+  const cacheMatch = /could not find the '([^']+)' column/i.exec(message)
+
+  return cacheMatch?.[1] ?? null
 }
 
 function resolveHeaderRow(sheet: ExcelJS.Worksheet): { rowNumber: number; columns: ColumnMap } | null {

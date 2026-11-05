@@ -9,10 +9,13 @@ import {
   RefreshCw,
   Search,
   Trash2,
+  Upload,
   WalletCards,
 } from 'lucide-react'
 
+import type { ImportResult } from '@/actions/import-articles'
 import { AssignProformaDialog } from '@/components/article-requests/assign-proforma-dialog'
+import { BatchImportDialog } from '@/components/article-requests/batch-import-dialog'
 import {
   SUPABASE_SETUP_MESSAGE,
   badgeClass,
@@ -33,7 +36,13 @@ import { Alert } from '@/components/ui/alert'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { Modal } from '@/components/ui/modal'
 import { SpinnerIcon } from '@/components/ui/icons'
-import { getArticleRate, getArticleTitle, type ArticleRequestRow } from '@/lib/article-request-meta'
+import {
+  getArticleBatchId,
+  getArticleBatchTag,
+  getArticleRate,
+  getArticleTitle,
+  type ArticleRequestRow,
+} from '@/lib/article-request-meta'
 import { isMissingColumnError } from '@/lib/supabase-errors'
 import { createClient } from '@/utils/supabase/client'
 
@@ -59,6 +68,8 @@ type ArticleRow = {
   tax_invoice_id: string | null
   notes: string | null
   created_at: string | null
+  batch_id?: string | null
+  batch_tag?: string | null
 }
 
 type FormState = {
@@ -137,6 +148,7 @@ export function ArticleRequestManager() {
 
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [assignOpen, setAssignOpen] = useState(false)
+  const [importOpen, setImportOpen] = useState(false)
   const [statusSavingId, setStatusSavingId] = useState<string | null>(null)
 
   const clientNames = useMemo(() => {
@@ -574,6 +586,32 @@ export function ArticleRequestManager() {
     }
   }
 
+  async function handleBatchImported(result: Extract<ImportResult, { ok: true }>) {
+    const count = result.imported.length
+    const parts = [
+      `${count} article request${count === 1 ? '' : 's'} imported${
+        result.batchTag ? ` as “${result.batchTag}”` : ''
+      }.`,
+    ]
+
+    if (result.vendorsCreated.length > 0) {
+      parts.push(
+        `Created ${result.vendorsCreated.length} vendor${
+          result.vendorsCreated.length === 1 ? '' : 's'
+        }.`
+      )
+    }
+
+    if (result.skipped.length > 0) {
+      parts.push(
+        `Skipped ${result.skipped.length} row${result.skipped.length === 1 ? '' : 's'} without an article title.`
+      )
+    }
+
+    setNotice({ tone: 'success', message: parts.join(' ') })
+    await loadData({ silent: true })
+  }
+
   async function handleDelete() {
     if (!deleteTarget) {
       return
@@ -626,10 +664,20 @@ export function ArticleRequestManager() {
           </p>
         </div>
 
-        <button type="button" onClick={openCreateDialog} className={primaryButtonClass}>
-          <Plus className="h-4 w-4" />
-          New article request
-        </button>
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+          <button
+            type="button"
+            onClick={() => setImportOpen(true)}
+            className={secondaryButtonClass}
+          >
+            <Upload className="h-4 w-4" />
+            Import Article Batch
+          </button>
+          <button type="button" onClick={openCreateDialog} className={primaryButtonClass}>
+            <Plus className="h-4 w-4" />
+            New article request
+          </button>
+        </div>
       </div>
 
       {notice && (
@@ -780,13 +828,13 @@ export function ArticleRequestManager() {
             </p>
             <p className="mt-1 text-sm text-slate-500">
               {articles.length === 0
-                ? 'Create the first request or import a spreadsheet from the proforma page.'
+                ? 'Create the first request or import an Excel batch to capture incoming demand.'
                 : 'Try a different search or clear the filters.'}
             </p>
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="min-w-[1200px] divide-y divide-slate-200 text-sm">
+            <table className="min-w-[1350px] divide-y divide-slate-200 text-sm">
               <caption className="sr-only">Article requests</caption>
               <thead className="bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
                 <tr>
@@ -810,6 +858,9 @@ export function ArticleRequestManager() {
                   </th>
                   <th scope="col" className="px-3 py-3">
                     Contact
+                  </th>
+                  <th scope="col" className="px-3 py-3">
+                    Batch
                   </th>
                   <th scope="col" className="px-3 py-3">
                     Article
@@ -844,6 +895,7 @@ export function ArticleRequestManager() {
                   const quantity = unitQuantity(article)
                   const selected = selectedIds.has(article.id)
                   const canBill = !article.tax_invoice_id && !article.proforma_invoice_id
+                  const batchLabel = displayBatch(article)
 
                   return (
                     <tr
@@ -877,6 +929,18 @@ export function ArticleRequestManager() {
                         {article.contact_id
                           ? contactNames.get(article.contact_id) ?? '—'
                           : '—'}
+                      </td>
+                      <td className="px-3 py-3">
+                        {batchLabel ? (
+                          <span
+                            className="inline-flex max-w-40 items-center truncate rounded bg-slate-100 px-1.5 py-0.5 text-[11px] font-medium text-slate-600"
+                            title={batchLabel}
+                          >
+                            {batchLabel}
+                          </span>
+                        ) : (
+                          <span className="text-slate-400">—</span>
+                        )}
                       </td>
                       <td className="max-w-[18rem] px-3 py-3">
                         <p className="truncate font-medium text-slate-900" title={displayDescription(article)}>
@@ -1220,6 +1284,15 @@ export function ArticleRequestManager() {
         }}
       />
 
+      <BatchImportDialog
+        open={importOpen}
+        onClose={() => setImportOpen(false)}
+        clients={clients}
+        departments={departments}
+        contacts={contacts}
+        onImported={handleBatchImported}
+      />
+
       <ConfirmDialog
         open={deleteTarget !== null}
         title={`Delete “${deleteTarget ? displayDescription(deleteTarget) : 'article request'}”?`}
@@ -1270,6 +1343,18 @@ function displayDescription(article: ArticleRow): string {
   }
 
   return getArticleTitle(article as ArticleRequestRow)
+}
+
+function displayBatch(article: ArticleRow): string | null {
+  const tag = getArticleBatchTag(article as ArticleRequestRow)
+
+  if (tag) {
+    return tag
+  }
+
+  const batchId = getArticleBatchId(article as ArticleRequestRow)
+
+  return batchId ? `Batch ${batchId.slice(0, 8).toUpperCase()}` : null
 }
 
 function unitCost(article: ArticleRow): number {

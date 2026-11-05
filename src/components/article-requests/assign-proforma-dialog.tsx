@@ -18,6 +18,7 @@ import {
 import { Alert } from '@/components/ui/alert'
 import { Modal } from '@/components/ui/modal'
 import { SpinnerIcon } from '@/components/ui/icons'
+import { createProformaInvoice } from '@/lib/proforma-invoices'
 import { isMissingColumnError } from '@/lib/supabase-errors'
 import { createClient } from '@/utils/supabase/client'
 
@@ -29,6 +30,8 @@ export type AssignableArticle = {
 
 type ExistingProforma = {
   id: string
+  pi_number?: string | null
+  pi_date?: string | null
   invoice_date: string | null
   subtotal: number | null
   grand_total: number | null
@@ -211,7 +214,6 @@ export function AssignProformaDialog({
 
     const supabase = createClient()
     const requestIds = articles.map((article) => article.id)
-    const today = new Date().toISOString().slice(0, 10)
 
     let invoiceId: string | null = null
     let rollback: (() => Promise<void>) | null = null
@@ -257,42 +259,22 @@ export function AssignProformaDialog({
             .eq('id', selectedProforma.id)
         }
       } else {
-        const basePayload: Record<string, unknown> = {
-          client_id: clientId,
+        const created = await createProformaInvoice(supabase, {
+          clientId,
           subtotal,
-          grand_total: grandTotal,
-          invoice_date: today,
+          taxRate: safeTaxRate,
+          taxAmount,
+          grandTotal,
+          statusCode: proformaStatusCode,
+        })
+
+        if (!created.ok) {
+          throw created.error
         }
 
-        if (proformaStatusCode) {
-          basePayload.status_code = proformaStatusCode
-        }
+        invoiceId = created.id
+        const createdId = created.id
 
-        let insertResult = await supabase
-          .from('proforma_invoices')
-          .insert({ ...basePayload, tax_rate: safeTaxRate, tax_amount: taxAmount })
-          .select('id')
-          .single()
-
-        if (insertResult.error && isMissingColumnError(insertResult.error)) {
-          insertResult = await supabase
-            .from('proforma_invoices')
-            .insert(basePayload)
-            .select('id')
-            .single()
-        }
-
-        if (insertResult.error) {
-          throw insertResult.error
-        }
-
-        invoiceId = insertResult.data?.id ?? null
-
-        if (!invoiceId) {
-          throw new Error('The proforma invoice could not be created.')
-        }
-
-        const createdId = invoiceId
         rollback = async () => {
           await supabase.from('proforma_invoices').delete().eq('id', createdId)
         }
@@ -576,8 +558,9 @@ function tabClass(active: boolean) {
 }
 
 function proformaLabel(proforma: ExistingProforma) {
-  const reference = `PF-${proforma.id.slice(0, 8).toUpperCase()}`
-  const date = formatDate(proforma.invoice_date)
+  const reference =
+    proforma.pi_number?.trim() || `PF-${proforma.id.slice(0, 8).toUpperCase()}`
+  const date = formatDate(proforma.pi_date ?? proforma.invoice_date)
   const total = formatCurrency(proforma.grand_total ?? 0)
 
   return `${reference} · ${date} · ${total}`

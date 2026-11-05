@@ -1,24 +1,24 @@
 'use client'
 
-import type { DragEvent, ReactNode } from 'react'
+import type { ReactNode } from 'react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
-import { importArticlesToProforma, type ImportResult } from '@/actions/import-articles'
 import {
   type ArticleRequestRow,
+  getArticleBatchId,
+  getArticleBatchTag,
   getArticleQuantity,
   getArticleRate,
   getArticleTitle,
   parseArticleRequestMeta,
 } from '@/lib/article-request-meta'
-import { isMissingColumnError } from '@/lib/supabase-errors'
+import { createProformaInvoice, DEFAULT_TAX_RATE } from '@/lib/proforma-invoices'
 import { Alert } from '@/components/ui/alert'
 import {
   FileSpreadsheetIcon,
   InboxIcon,
   RefreshIcon,
   SpinnerIcon,
-  UploadIcon,
 } from '@/components/ui/icons'
 import { Modal } from '@/components/ui/modal'
 import {
@@ -38,17 +38,22 @@ type DepartmentOption = { id: string; department_name: string }
 type ContactOption = { id: string; contact_name: string; email: string | null }
 type VendorOption = { id: string; vendor_name: string }
 
-type TabKey = 'pending' | 'import'
+type SelectionMode = 'individual' | 'batch'
 
-type ImportedSummary = Extract<ImportResult, { ok: true }>
+type BatchGroup = {
+  key: string
+  batchId: string | null
+  label: string
+  rows: ArticleRequestRow[]
+  total: number
+  latest: string
+}
 
 type CreateProformaDialogProps = {
   open: boolean
   onClose: () => void
   onCreated?: () => void
 }
-
-const DEFAULT_TAX_RATE = 18
 
 export function CreateProformaDialog({ open, onClose, onCreated }: CreateProformaDialogProps) {
   const [clients, setClients] = useState<ClientOption[]>([])
@@ -66,20 +71,14 @@ export function CreateProformaDialog({ open, onClose, onCreated }: CreateProform
   const [contacts, setContacts] = useState<ContactOption[]>([])
   const [contactsLoading, setContactsLoading] = useState(false)
 
-  const [activeTab, setActiveTab] = useState<TabKey>('pending')
+  const [mode, setMode] = useState<SelectionMode>('individual')
 
   const [pendingRows, setPendingRows] = useState<ArticleRequestRow[]>([])
   const [pendingLoading, setPendingLoading] = useState(false)
   const [pendingError, setPendingError] = useState<string | null>(null)
   const [pendingRefresh, setPendingRefresh] = useState(0)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
-
-  const [importFile, setImportFile] = useState<File | null>(null)
-  const [importing, setImporting] = useState(false)
-  const [dragging, setDragging] = useState(false)
-  const [importError, setImportError] = useState<string | null>(null)
-  const [importSummary, setImportSummary] = useState<ImportedSummary | null>(null)
-  const fileInputRef = useRef<HTMLInputElement>(null)
+  const [selectedBatchKey, setSelectedBatchKey] = useState('')
 
   const [taxRate, setTaxRate] = useState(String(DEFAULT_TAX_RATE))
   const [generating, setGenerating] = useState(false)
@@ -101,14 +100,12 @@ export function CreateProformaDialog({ open, onClose, onCreated }: CreateProform
       return
     }
 
-    setActiveTab('pending')
+    setMode('individual')
     setSelectedClientId('')
     setSelectedDepartmentId('')
     setSelectedContactId('')
     setSelectedIds(new Set())
-    setImportFile(null)
-    setImportError(null)
-    setImportSummary(null)
+    setSelectedBatchKey('')
     setGenerateError(null)
     setTaxRate(String(DEFAULT_TAX_RATE))
     setPendingRows([])
@@ -289,6 +286,7 @@ export function CreateProformaDialog({ open, onClose, onCreated }: CreateProform
   // Clear the selection when the client changes.
   useEffect(() => {
     setSelectedIds(new Set())
+    setSelectedBatchKey('')
     setSelectedContactId('')
     setGenerateError(null)
   }, [selectedClientId])
@@ -307,15 +305,70 @@ export function CreateProformaDialog({ open, onClose, onCreated }: CreateProform
     }
   }, [selectedRows.length, pendingRows.length])
 
+  const batchGroups = useMemo(() => {
+    const groups = new Map<string, BatchGroup>()
+
+    for (const row of pendingRows) {
+      const batchId = getArticleBatchId(row)
+      const tag = getArticleBatchTag(row)
+      const key = batchId ?? '__ungrouped__'
+      const timestamp = row.created_at ?? row.request_date ?? ''
+      const amount = roundMoney(getArticleRate(row) * getArticleQuantity(row))
+
+      const existing = groups.get(key)
+
+      if (existing) {
+        existing.rows.push(row)
+        existing.total = roundMoney(existing.total + amount)
+        if (timestamp > existing.latest) {
+          existing.latest = timestamp
+        }
+      } else {
+        groups.set(key, {
+          key,
+          batchId,
+          label: tag
+            ? tag
+            : batchId
+              ? `Batch ${batchId.slice(0, 8).toUpperCase()}`
+              : 'Ungrouped requests',
+          rows: [row],
+          total: amount,
+          latest: timestamp,
+        })
+      }
+    }
+
+    return [...groups.values()].sort((a, b) => {
+      if (a.batchId === null) return 1
+      if (b.batchId === null) return -1
+      return b.latest.localeCompare(a.latest)
+    })
+  }, [pendingRows])
+
+  useEffect(() => {
+    if (!selectedBatchKey) {
+      return
+    }
+
+    if (!batchGroups.some((group) => group.key === selectedBatchKey)) {
+      setSelectedBatchKey('')
+    }
+  }, [batchGroups, selectedBatchKey])
+
+  const selectedBatch = batchGroups.find((group) => group.key === selectedBatchKey) ?? null
+
+  const effectiveRows = mode === 'batch' ? selectedBatch?.rows ?? [] : selectedRows
+
   const subtotal = useMemo(
     () =>
       roundMoney(
-        selectedRows.reduce(
+        effectiveRows.reduce(
           (total, row) => total + getArticleRate(row) * getArticleQuantity(row),
           0
         )
       ),
-    [selectedRows]
+    [effectiveRows]
   )
 
   const numericTaxRate = Number(taxRate)
@@ -351,82 +404,18 @@ export function CreateProformaDialog({ open, onClose, onCreated }: CreateProform
     setGenerateError(null)
   }
 
-  async function handleFile(file: File) {
-    if (!selectedClientId) {
-      setImportError('Select a client before importing articles.')
-      return
-    }
-
-    if (!/\.(xlsx|xlsm)$/i.test(file.name)) {
-      setImportError('Only .xlsx or .xlsm files are supported.')
-      return
-    }
-
-    setImportFile(file)
-    setImportError(null)
-    setImportSummary(null)
-    setImporting(true)
-
-    try {
-      const formData = new FormData()
-      formData.append('file', file)
-      formData.append('clientId', selectedClientId)
-      if (selectedDepartmentId) {
-        formData.append('departmentId', selectedDepartmentId)
-      }
-
-      const result = await importArticlesToProforma(formData)
-
-      if (!result.ok) {
-        setImportError(result.error)
-        return
-      }
-
-      setImportSummary(result)
-      setSelectedIds((current) => {
-        const next = new Set(current)
-        for (const item of result.imported) {
-          next.add(item.id)
-        }
-        return next
-      })
-      setPendingRefresh((version) => version + 1)
-      setImportFile(null)
-    } catch (error) {
-      setImportError(
-        getErrorMessage(error, 'The workbook could not be uploaded. Check your connection and retry.')
-      )
-    } finally {
-      setImporting(false)
-      if (fileInputRef.current) {
-        fileInputRef.current.value = ''
-      }
-    }
-  }
-
-  function handleDrop(event: DragEvent<HTMLLabelElement>) {
-    event.preventDefault()
-    setDragging(false)
-
-    if (importing) {
-      return
-    }
-
-    const file = event.dataTransfer.files?.[0]
-
-    if (file) {
-      void handleFile(file)
-    }
-  }
-
   async function handleGenerate() {
     if (!selectedClientId) {
       setGenerateError('Select a client before generating an invoice.')
       return
     }
 
-    if (selectedRows.length === 0) {
-      setGenerateError('Select at least one unbilled article request.')
+    if (effectiveRows.length === 0) {
+      setGenerateError(
+        mode === 'batch'
+          ? 'Select an unbilled batch to generate an invoice.'
+          : 'Select at least one unbilled article request.'
+      )
       return
     }
 
@@ -439,66 +428,30 @@ export function CreateProformaDialog({ open, onClose, onCreated }: CreateProform
     setGenerateError(null)
 
     const supabase = createClient()
-
-    const basePayload: Record<string, unknown> = {
-      client_id: selectedClientId,
-      subtotal: roundMoney(subtotal),
-      grand_total: grandTotal,
-      invoice_date: new Date().toISOString().slice(0, 10),
-      tax_rate: safeTaxRate,
-      tax_amount: taxAmount,
-    }
-
-    if (proformaStatusCode) {
-      basePayload.status_code = proformaStatusCode
-    }
-
-    const detailPayload: Record<string, unknown> = {
-      ...basePayload,
-      department_id: selectedDepartmentId || null,
-      contact_id: selectedContactId || null,
-    }
-
     let invoiceId: string | null = null
-    let invoiceError: unknown = null
 
     try {
-      const detailResult = await supabase
-        .from('proforma_invoices')
-        .insert(detailPayload)
-        .select('id')
-        .single()
+      const created = await createProformaInvoice(supabase, {
+        clientId: selectedClientId,
+        departmentId: selectedDepartmentId || null,
+        contactId: selectedContactId || null,
+        subtotal,
+        taxRate: safeTaxRate,
+        taxAmount,
+        grandTotal,
+        statusCode: proformaStatusCode,
+      })
 
-      if (detailResult.error && isMissingColumnError(detailResult.error)) {
-        const fallbackResult = await supabase
-          .from('proforma_invoices')
-          .insert(basePayload)
-          .select('id')
-          .single()
-
-        if (fallbackResult.error) {
-          invoiceError = fallbackResult.error
-        } else {
-          invoiceId = fallbackResult.data?.id ?? null
-        }
-      } else if (detailResult.error) {
-        invoiceError = detailResult.error
-      } else {
-        invoiceId = detailResult.data?.id ?? null
+      if (!created.ok) {
+        setGenerateError(
+          getErrorMessage(created.error, 'Unable to create the proforma invoice.')
+        )
+        return
       }
-    } catch (error) {
-      invoiceError = error
-    }
 
-    if (!invoiceId) {
-      setGenerating(false)
-      setGenerateError(getErrorMessage(invoiceError, 'Unable to create the proforma invoice.'))
-      return
-    }
+      invoiceId = created.id
 
-    const requestIds = selectedRows.map((row) => row.id)
-
-    try {
+      const requestIds = effectiveRows.map((row) => row.id)
       const { data: linked, error: linkError } = await supabase
         .from('article_requests')
         .update({ proforma_invoice_id: invoiceId })
@@ -516,22 +469,26 @@ export function CreateProformaDialog({ open, onClose, onCreated }: CreateProform
       }
 
       setSelectedIds(new Set())
-      setImportSummary(null)
+      setSelectedBatchKey('')
       setPendingRefresh((version) => version + 1)
       onCreated?.()
       onClose()
     } catch (error) {
       // Roll the invoice back so we never leave an empty invoice behind.
-      try {
-        await supabase.from('proforma_invoices').delete().eq('id', invoiceId)
-      } catch {
-        // Best effort only.
+      if (invoiceId) {
+        try {
+          await supabase.from('proforma_invoices').delete().eq('id', invoiceId)
+        } catch {
+          // Best effort only.
+        }
       }
 
       setGenerateError(
         getErrorMessage(
           error,
-          'The article requests could not be linked to the invoice. The invoice was rolled back.'
+          invoiceId
+            ? 'The article requests could not be linked to the invoice. The invoice was rolled back.'
+            : 'Unable to create the proforma invoice.'
         )
       )
     } finally {
@@ -545,7 +502,7 @@ export function CreateProformaDialog({ open, onClose, onCreated }: CreateProform
       onClose={closeDialog}
       size="4xl"
       title="Create proforma invoice"
-      description="Pick a client, then choose pending article requests or import a spreadsheet."
+      description="Pick a client, then select individual pending requests or a complete unbilled batch."
       headerContent={
         <div className="space-y-3">
           <div className="grid gap-3 sm:grid-cols-3">
@@ -688,7 +645,7 @@ export function CreateProformaDialog({ open, onClose, onCreated }: CreateProform
               <button
                 type="button"
                 onClick={() => void handleGenerate()}
-                disabled={generating || !selectedClientId || selectedRows.length === 0}
+                disabled={generating || !selectedClientId || effectiveRows.length === 0}
                 className={primaryButtonClass}
               >
                 {generating ? (
@@ -701,9 +658,9 @@ export function CreateProformaDialog({ open, onClose, onCreated }: CreateProform
             </div>
           </div>
 
-          {selectedClient && selectedRows.length > 0 && (
+          {selectedClient && effectiveRows.length > 0 && (
             <p className="text-xs text-slate-500">
-              {selectedRows.length} request{selectedRows.length === 1 ? '' : 's'} for{' '}
+              {effectiveRows.length} request{effectiveRows.length === 1 ? '' : 's'} for{' '}
               <span className="font-medium text-slate-700">{selectedClient.company_name}</span> will
               be linked to this invoice.
             </p>
@@ -715,33 +672,34 @@ export function CreateProformaDialog({ open, onClose, onCreated }: CreateProform
         <button
           type="button"
           role="tab"
-          id="proforma-tab-pending"
-          aria-selected={activeTab === 'pending'}
-          aria-controls="proforma-panel-pending"
-          onClick={() => setActiveTab('pending')}
-          className={tabClass(activeTab === 'pending')}
+          id="proforma-tab-individual"
+          aria-selected={mode === 'individual'}
+          aria-controls="proforma-panel-individual"
+          onClick={() => setMode('individual')}
+          className={tabClass(mode === 'individual')}
         >
-          Pending Unbilled Requests
-          <span className={tabBadgeClass(activeTab === 'pending')}>{pendingRows.length}</span>
+          Individual requests
+          <span className={tabBadgeClass(mode === 'individual')}>{pendingRows.length}</span>
         </button>
         <button
           type="button"
           role="tab"
-          id="proforma-tab-import"
-          aria-selected={activeTab === 'import'}
-          aria-controls="proforma-panel-import"
-          onClick={() => setActiveTab('import')}
-          className={tabClass(activeTab === 'import')}
+          id="proforma-tab-batch"
+          aria-selected={mode === 'batch'}
+          aria-controls="proforma-panel-batch"
+          onClick={() => setMode('batch')}
+          className={tabClass(mode === 'batch')}
         >
-          Bulk Excel Import
+          Entire unbilled batch
+          <span className={tabBadgeClass(mode === 'batch')}>{batchGroups.length}</span>
         </button>
       </div>
 
-      {activeTab === 'pending' ? (
+      {mode === 'individual' ? (
         <div
           role="tabpanel"
-          id="proforma-panel-pending"
-          aria-labelledby="proforma-tab-pending"
+          id="proforma-panel-individual"
+          aria-labelledby="proforma-tab-individual"
           className="mt-4"
         >
           {!selectedClientId ? (
@@ -767,16 +725,11 @@ export function CreateProformaDialog({ open, onClose, onCreated }: CreateProform
           ) : pendingRows.length === 0 ? (
             <EmptyState
               title="No pending requests"
-              description="Every article request for this client is already on an invoice, or none have been captured yet."
+              description="Every article request for this client is already on an invoice, or none have been captured yet. Import a batch from Article Requests to add more."
               action={
-                <button
-                  type="button"
-                  onClick={() => setActiveTab('import')}
-                  className={`${secondaryButtonClass} mt-4`}
-                >
-                  <UploadIcon className="h-4 w-4" />
-                  Import from Excel
-                </button>
+                <a href="/article-requests" className={`${secondaryButtonClass} mt-4`}>
+                  Go to Article Requests
+                </a>
               }
             />
           ) : (
@@ -889,114 +842,129 @@ export function CreateProformaDialog({ open, onClose, onCreated }: CreateProform
       ) : (
         <div
           role="tabpanel"
-          id="proforma-panel-import"
-          aria-labelledby="proforma-tab-import"
+          id="proforma-panel-batch"
+          aria-labelledby="proforma-tab-batch"
           className="mt-4 space-y-3"
         >
-          <label
-            htmlFor="proforma-import-file"
-            onDragOver={(event) => {
-              event.preventDefault()
-              if (!importing && selectedClientId) {
-                setDragging(true)
-              }
-            }}
-            onDragLeave={() => setDragging(false)}
-            onDrop={handleDrop}
-            className={`flex cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed px-6 py-10 text-center transition-colors ${
-              !selectedClientId
-                ? 'cursor-not-allowed border-slate-200 bg-slate-50'
-                : dragging
-                  ? 'border-brand-500 bg-brand-50'
-                  : 'border-slate-300 bg-white hover:border-brand-400 hover:bg-brand-50/40'
-            }`}
-            aria-disabled={!selectedClientId || importing}
-          >
-            <input
-              ref={fileInputRef}
-              id="proforma-import-file"
-              type="file"
-              accept=".xlsx,.xlsm"
-              className="sr-only"
-              disabled={!selectedClientId || importing}
-              onChange={(event) => {
-                const file = event.target.files?.[0]
-                if (file) {
-                  void handleFile(file)
-                }
-              }}
+          {!selectedClientId ? (
+            <EmptyState
+              title="Select a client to begin"
+              description="Unbilled batches are grouped from the client's pending article requests."
             />
+          ) : pendingLoading ? (
+            <PendingSkeleton />
+          ) : pendingError ? (
+            <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-6 text-center">
+              <p className="text-sm font-semibold text-red-700">Could not load article requests</p>
+              <p className="mx-auto mt-1 max-w-lg text-sm text-red-600">{pendingError}</p>
+              <button
+                type="button"
+                onClick={() => setPendingRefresh((version) => version + 1)}
+                className={`${secondaryButtonClass} mt-4`}
+              >
+                <RefreshIcon className="h-4 w-4" />
+                Try again
+              </button>
+            </div>
+          ) : batchGroups.length === 0 ? (
+            <EmptyState
+              title="No unbilled batches"
+              description="Import an Excel batch from Article Requests, then return here to invoice the whole batch at once."
+              action={
+                <a href="/article-requests" className={`${secondaryButtonClass} mt-4`}>
+                  Go to Article Requests
+                </a>
+              }
+            />
+          ) : (
+            <>
+              <div>
+                <label htmlFor="proforma-batch" className={labelClass}>
+                  Unbilled batch
+                </label>
+                <select
+                  id="proforma-batch"
+                  value={selectedBatchKey}
+                  onChange={(event) => {
+                    setSelectedBatchKey(event.target.value)
+                    setGenerateError(null)
+                  }}
+                  disabled={generating}
+                  className={inputClass}
+                >
+                  <option value="">Select a batch</option>
+                  {batchGroups.map((group) => (
+                    <option key={group.key} value={group.key}>
+                      {group.label} · {group.rows.length} request
+                      {group.rows.length === 1 ? '' : 's'} · {formatCurrency(group.total)}
+                    </option>
+                  ))}
+                </select>
+              </div>
 
-            <span className="flex h-11 w-11 items-center justify-center rounded-full bg-brand-100 text-brand-700">
-              {importing ? (
-                <SpinnerIcon className="h-5 w-5" />
+              {selectedBatch ? (
+                <div className="overflow-hidden rounded-xl border border-slate-200">
+                  <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-slate-50 px-3 py-2">
+                    <p className="text-xs font-medium text-slate-600">
+                      {selectedBatch.label} · {selectedBatch.rows.length} request
+                      {selectedBatch.rows.length === 1 ? '' : 's'}
+                    </p>
+                    <p className="text-xs text-slate-500">{formatCurrency(selectedBatch.total)}</p>
+                  </div>
+                  <div className="max-h-[36vh] overflow-auto">
+                    <table className="min-w-full divide-y divide-slate-200 text-sm">
+                      <caption className="sr-only">Selected batch article requests</caption>
+                      <thead className="sticky top-0 z-10 bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                        <tr>
+                          <th scope="col" className="px-3 py-2.5">
+                            Article
+                          </th>
+                          <th scope="col" className="px-3 py-2.5 text-right">
+                            Qty
+                          </th>
+                          <th scope="col" className="px-3 py-2.5 text-right">
+                            Rate
+                          </th>
+                          <th scope="col" className="px-3 py-2.5 text-right">
+                            Amount
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 bg-white">
+                        {selectedBatch.rows.map((row) => {
+                          const quantity = getArticleQuantity(row)
+                          const rate = getArticleRate(row)
+
+                          return (
+                            <tr key={row.id}>
+                              <td className="max-w-[22rem] px-3 py-2.5">
+                                <p className="truncate text-slate-900" title={getArticleTitle(row)}>
+                                  {getArticleTitle(row)}
+                                </p>
+                              </td>
+                              <td className="px-3 py-2.5 text-right tabular-nums text-slate-600">
+                                {quantity}
+                              </td>
+                              <td className="px-3 py-2.5 text-right tabular-nums text-slate-600">
+                                {formatCurrency(rate)}
+                              </td>
+                              <td className="px-3 py-2.5 text-right font-medium tabular-nums text-slate-900">
+                                {formatCurrency(roundMoney(rate * quantity))}
+                              </td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
               ) : (
-                <UploadIcon className="h-5 w-5" />
+                <p className="text-xs text-slate-500">
+                  Choose a batch above to preview its article requests before generating the invoice.
+                </p>
               )}
-            </span>
-
-            <span className="text-sm font-medium text-slate-900">
-              {importing
-                ? 'Importing articles…'
-                : !selectedClientId
-                  ? 'Select a client to enable import'
-                  : 'Drop your .xlsx file here, or click to browse'}
-            </span>
-
-            <span className="text-xs text-slate-500">
-              {importFile && !importing ? importFile.name : 'One worksheet per file · up to 8 MB'}
-            </span>
-          </label>
-
-          {importError && (
-            <Alert tone="error" onDismiss={() => setImportError(null)}>
-              {importError}
-            </Alert>
+            </>
           )}
-
-          {importSummary && (
-            <Alert tone="success" onDismiss={() => setImportSummary(null)}>
-              Imported {importSummary.imported.length} article request
-              {importSummary.imported.length === 1 ? '' : 's'} and selected{' '}
-              {importSummary.imported.length === 1 ? 'it' : 'them'} for this invoice.
-              {importSummary.vendorsCreated.length > 0 && (
-                <>
-                  {' '}
-                  Created {importSummary.vendorsCreated.length} vendor
-                  {importSummary.vendorsCreated.length === 1 ? '' : 's'}:{' '}
-                  {importSummary.vendorsCreated.join(', ')}.
-                </>
-              )}
-              {importSummary.skipped.length > 0 && (
-                <>
-                  {' '}
-                  Skipped {importSummary.skipped.length} row
-                  {importSummary.skipped.length === 1 ? '' : 's'} without an article title.
-                </>
-              )}
-              {importSummary.usedFallbackColumns && (
-                <>
-                  {' '}
-                  The database is missing the optional title/rate columns; the details were stored in
-                  the request notes. Apply the proforma migration to store them natively.
-                </>
-              )}
-            </Alert>
-          )}
-
-          <div className="rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3 text-xs text-slate-600">
-            <p className="font-medium text-slate-700">Expected columns</p>
-            <p className="mt-1">
-              <span className="font-medium text-slate-800">Article</span> (required),{' '}
-              <span className="font-medium text-slate-800">Vendor</span>,{' '}
-              <span className="font-medium text-slate-800">Quantity</span>,{' '}
-              <span className="font-medium text-slate-800">Rate</span>,{' '}
-              <span className="font-medium text-slate-800">Request date</span>,{' '}
-              <span className="font-medium text-slate-800">Remarks</span>. Headers are matched
-              case-insensitively, and common aliases such as “Title”, “Qty”, “Price” and “Notes”
-              work too. Unknown vendors are created automatically and linked to the selected client.
-            </p>
-          </div>
         </div>
       )}
     </Modal>

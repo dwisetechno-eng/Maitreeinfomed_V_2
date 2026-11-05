@@ -19,6 +19,8 @@ type ClientOption = { id: string; company_name: string }
 
 type ProformaInvoiceRow = {
   id: string
+  pi_number: string | null
+  pi_date: string | null
   client_id: string | null
   status_code: string | null
   subtotal: number | null
@@ -100,8 +102,8 @@ export function ProformaInvoicesManager() {
             Proforma Invoices
           </h1>
           <p className="mt-1 max-w-2xl text-sm text-slate-600">
-            Group unbilled article requests into a proforma invoice, either by picking them manually
-            or importing a spreadsheet.
+            Group unbilled article requests into a proforma invoice by selecting individual requests
+            or an entire imported batch.
           </p>
         </div>
 
@@ -202,14 +204,14 @@ export function ProformaInvoicesManager() {
                   <tr key={invoice.id} className="transition-colors hover:bg-slate-50/70">
                     <td className="px-4 py-3">
                       <span className="font-mono text-xs font-medium text-slate-700">
-                        {invoice.id.slice(0, 8).toUpperCase()}
+                        {invoice.pi_number?.trim() || invoice.id.slice(0, 8).toUpperCase()}
                       </span>
                     </td>
                     <td className="px-4 py-3 font-medium text-slate-900">
                       {invoice.client_id ? clientNames.get(invoice.client_id) ?? 'Unknown client' : '—'}
                     </td>
                     <td className="whitespace-nowrap px-4 py-3 text-slate-600">
-                      {formatDate(invoice.invoice_date ?? invoice.created_at)}
+                      {formatDate(invoice.pi_date ?? invoice.invoice_date ?? invoice.created_at)}
                     </td>
                     <td className="px-4 py-3">
                       {invoice.status_code ? (
