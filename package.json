@@ -5,7 +5,9 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "next start"
+    "start": "next start",
+    "deploy": "npm run build && git add . && git commit -m \"Update and deploy to Vercel\" && git push origin main"
+
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.7",

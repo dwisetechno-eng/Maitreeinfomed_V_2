@@ -1,10 +1,11 @@
-import { PagePlaceholder } from '@/components/layout/page-placeholder'
+import type { Metadata } from 'next'
+
+import { DepartmentManager } from '@/components/masters/department-manager'
+
+export const metadata: Metadata = {
+  title: 'Departments',
+}
 
 export default function DepartmentsPage() {
-  return (
-    <PagePlaceholder
-      title="Departments"
-      description="Maintain the departments that raise and process article requests."
-    />
-  )
+  return <DepartmentManager />
 }

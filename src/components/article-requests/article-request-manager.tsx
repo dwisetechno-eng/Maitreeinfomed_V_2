@@ -1,0 +1,1320 @@
+'use client'
+
+import type { FormEvent } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import {
+  FileText,
+  Pencil,
+  Plus,
+  RefreshCw,
+  Search,
+  Trash2,
+  WalletCards,
+} from 'lucide-react'
+
+import { AssignProformaDialog } from '@/components/article-requests/assign-proforma-dialog'
+import {
+  SUPABASE_SETUP_MESSAGE,
+  badgeClass,
+  cardClass,
+  formatCurrency,
+  formatDate,
+  getErrorMessage,
+  hasSupabaseEnv,
+  inputClass,
+  labelClass,
+  primaryButtonClass,
+  rowActionClass,
+  rowDangerActionClass,
+  roundMoney,
+  secondaryButtonClass,
+} from '@/components/masters/utils'
+import { Alert } from '@/components/ui/alert'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
+import { Modal } from '@/components/ui/modal'
+import { SpinnerIcon } from '@/components/ui/icons'
+import { getArticleRate, getArticleTitle, type ArticleRequestRow } from '@/lib/article-request-meta'
+import { isMissingColumnError } from '@/lib/supabase-errors'
+import { createClient } from '@/utils/supabase/client'
+
+type ClientRow = { id: string; company_name: string }
+type DepartmentRow = { id: string; department_name: string; client_id: string | null }
+type VendorRow = { id: string; vendor_name: string }
+type ContactRow = { id: string; client_id: string | null; contact_name: string }
+type StatusRow = { status_code: string; status_label: string; display_order: number | null }
+
+type ArticleRow = {
+  id: string
+  client_id: string | null
+  department_id: string | null
+  vendor_id: string | null
+  contact_id?: string | null
+  article_description: string | null
+  cost_price: number | null
+  quantity: number | null
+  urgency: string | null
+  status_code: string | null
+  request_date: string | null
+  proforma_invoice_id: string | null
+  tax_invoice_id: string | null
+  notes: string | null
+  created_at: string | null
+}
+
+type FormState = {
+  client_id: string
+  department_id: string
+  contact_id: string
+  article_description: string
+  vendor_id: string
+  cost_price: string
+  quantity: string
+  urgency: string
+  status_code: string
+  request_date: string
+}
+
+type DialogState = { mode: 'create' } | { mode: 'edit'; row: ArticleRow }
+
+const URGENCIES = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'] as const
+
+const URGENCY_TONES: Record<string, string> = {
+  LOW: 'bg-slate-100 text-slate-600 ring-slate-500/20',
+  MEDIUM: 'bg-sky-50 text-sky-700 ring-sky-600/20',
+  HIGH: 'bg-amber-50 text-amber-700 ring-amber-600/20',
+  CRITICAL: 'bg-rose-50 text-rose-700 ring-rose-600/20',
+}
+
+const STATUS_TONES: Record<string, string> = {
+  REQUEST_SENT: 'bg-sky-50 text-sky-700 ring-sky-600/20',
+  AWAITED_VENDOR: 'bg-amber-50 text-amber-700 ring-amber-600/20',
+  EMAILED_CLIENT: 'bg-violet-50 text-violet-700 ring-violet-600/20',
+  PI_GENERATED: 'bg-indigo-50 text-indigo-700 ring-indigo-600/20',
+  ON_HOLD: 'bg-rose-50 text-rose-700 ring-rose-600/20',
+  COMPLETED: 'bg-emerald-50 text-emerald-700 ring-emerald-600/20',
+}
+
+const EMPTY_FORM: FormState = {
+  client_id: '',
+  department_id: '',
+  contact_id: '',
+  article_description: '',
+  vendor_id: '',
+  cost_price: '0',
+  quantity: '1',
+  urgency: 'MEDIUM',
+  status_code: '',
+  request_date: new Date().toISOString().slice(0, 10),
+}
+
+export function ArticleRequestManager() {
+  const [articles, setArticles] = useState<ArticleRow[]>([])
+  const [clients, setClients] = useState<ClientRow[]>([])
+  const [departments, setDepartments] = useState<DepartmentRow[]>([])
+  const [vendors, setVendors] = useState<VendorRow[]>([])
+  const [contacts, setContacts] = useState<ContactRow[]>([])
+  const [statuses, setStatuses] = useState<StatusRow[]>([])
+
+  const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const [notice, setNotice] = useState<{ tone: 'success' | 'error'; message: string } | null>(null)
+
+  const [query, setQuery] = useState('')
+  const [clientFilter, setClientFilter] = useState('')
+  const [departmentFilter, setDepartmentFilter] = useState('')
+  const [vendorFilter, setVendorFilter] = useState('')
+  const [urgencyFilter, setUrgencyFilter] = useState('')
+  const [statusFilter, setStatusFilter] = useState('')
+
+  const [dialog, setDialog] = useState<DialogState | null>(null)
+  const [form, setForm] = useState<FormState>(EMPTY_FORM)
+  const [formError, setFormError] = useState<string | null>(null)
+  const [saving, setSaving] = useState(false)
+
+  const [deleteTarget, setDeleteTarget] = useState<ArticleRow | null>(null)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
+  const [deleting, setDeleting] = useState(false)
+
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [assignOpen, setAssignOpen] = useState(false)
+  const [statusSavingId, setStatusSavingId] = useState<string | null>(null)
+
+  const clientNames = useMemo(() => {
+    const map = new Map<string, string>()
+    for (const client of clients) {
+      map.set(client.id, client.company_name)
+    }
+    return map
+  }, [clients])
+
+  const departmentNames = useMemo(() => {
+    const map = new Map<string, string>()
+    for (const department of departments) {
+      map.set(department.id, department.department_name)
+    }
+    return map
+  }, [departments])
+
+  const vendorNames = useMemo(() => {
+    const map = new Map<string, string>()
+    for (const vendor of vendors) {
+      map.set(vendor.id, vendor.vendor_name)
+    }
+    return map
+  }, [vendors])
+
+  const contactNames = useMemo(() => {
+    const map = new Map<string, string>()
+    for (const contact of contacts) {
+      map.set(contact.id, contact.contact_name)
+    }
+    return map
+  }, [contacts])
+
+  const statusLabels = useMemo(() => {
+    const map = new Map<string, string>()
+    for (const status of statuses) {
+      map.set(status.status_code, status.status_label)
+    }
+    return map
+  }, [statuses])
+
+  const loadData = useCallback(async (options?: { silent?: boolean }) => {
+    if (!options?.silent) {
+      setLoading(true)
+    }
+    setLoadError(null)
+
+    if (!hasSupabaseEnv()) {
+      setLoadError(SUPABASE_SETUP_MESSAGE)
+      setLoading(false)
+      return
+    }
+
+    try {
+      const supabase = createClient()
+      const [articlesResult, clientsResult, departmentsResult, vendorsResult, contactsResult, statusesResult] =
+        await Promise.all([
+          supabase.from('article_requests').select('*').order('request_date', { ascending: false }),
+          supabase.from('clients').select('id, company_name').order('company_name', { ascending: true }),
+          supabase
+            .from('departments')
+            .select('id, department_name, client_id')
+            .order('department_name', { ascending: true }),
+          supabase.from('vendors').select('id, vendor_name').order('vendor_name', { ascending: true }),
+          supabase
+            .from('client_contacts')
+            .select('id, client_id, contact_name')
+            .order('contact_name', { ascending: true }),
+          supabase
+            .from('article_status_master')
+            .select('status_code, status_label, display_order')
+            .order('display_order', { ascending: true })
+            .order('status_code', { ascending: true }),
+        ])
+
+      const firstError =
+        articlesResult.error ??
+        clientsResult.error ??
+        departmentsResult.error ??
+        vendorsResult.error ??
+        contactsResult.error ??
+        statusesResult.error
+
+      if (firstError) {
+        throw firstError
+      }
+
+      setArticles((articlesResult.data ?? []) as ArticleRow[])
+      setClients((clientsResult.data ?? []) as ClientRow[])
+      setDepartments((departmentsResult.data ?? []) as DepartmentRow[])
+      setVendors((vendorsResult.data ?? []) as VendorRow[])
+      setContacts((contactsResult.data ?? []) as ContactRow[])
+      setStatuses((statusesResult.data ?? []) as StatusRow[])
+    } catch (error) {
+      setLoadError(getErrorMessage(error, 'Unable to load article requests.'))
+    } finally {
+      if (!options?.silent) {
+        setLoading(false)
+      }
+    }
+  }, [])
+
+  useEffect(() => {
+    void loadData()
+  }, [loadData])
+
+  // Keep dependent filters coherent when the client filter changes.
+  useEffect(() => {
+    if (!departmentFilter) {
+      return
+    }
+
+    const department = departments.find((item) => item.id === departmentFilter)
+
+    if (!department || (clientFilter && department.client_id !== clientFilter)) {
+      setDepartmentFilter('')
+    }
+  }, [clientFilter, departmentFilter, departments])
+
+  const filterDepartments = useMemo(() => {
+    if (!clientFilter) {
+      return departments
+    }
+
+    return departments.filter((department) => department.client_id === clientFilter)
+  }, [clientFilter, departments])
+
+  const formDepartments = useMemo(() => {
+    if (!form.client_id) {
+      return []
+    }
+
+    return departments.filter((department) => department.client_id === form.client_id)
+  }, [departments, form.client_id])
+
+  const formContacts = useMemo(() => {
+    if (!form.client_id) {
+      return []
+    }
+
+    return contacts.filter((contact) => contact.client_id === form.client_id)
+  }, [contacts, form.client_id])
+
+  const filteredArticles = useMemo(() => {
+    const term = query.trim().toLowerCase()
+
+    return articles.filter((article) => {
+      if (clientFilter && article.client_id !== clientFilter) {
+        return false
+      }
+
+      if (departmentFilter && article.department_id !== departmentFilter) {
+        return false
+      }
+
+      if (vendorFilter && article.vendor_id !== vendorFilter) {
+        return false
+      }
+
+      if (urgencyFilter && normalizeUrgency(article.urgency) !== urgencyFilter) {
+        return false
+      }
+
+      if (statusFilter && article.status_code !== statusFilter) {
+        return false
+      }
+
+      if (!term) {
+        return true
+      }
+
+      return [
+        displayDescription(article),
+        clientNames.get(article.client_id ?? '') ?? '',
+        departmentNames.get(article.department_id ?? '') ?? '',
+        vendorNames.get(article.vendor_id ?? '') ?? '',
+        article.contact_id ? contactNames.get(article.contact_id) ?? '' : '',
+      ]
+        .join(' ')
+        .toLowerCase()
+        .includes(term)
+    })
+  }, [
+    articles,
+    clientFilter,
+    clientNames,
+    contactNames,
+    departmentFilter,
+    departmentNames,
+    query,
+    statusFilter,
+    urgencyFilter,
+    vendorFilter,
+    vendorNames,
+  ])
+
+  const selectableFiltered = useMemo(
+    () =>
+      filteredArticles.filter(
+        (article) => !article.tax_invoice_id && !article.proforma_invoice_id
+      ),
+    [filteredArticles]
+  )
+
+  const selectedArticles = useMemo(
+    () => articles.filter((article) => selectedIds.has(article.id)),
+    [articles, selectedIds]
+  )
+
+  const selectedClientIds = useMemo(
+    () => new Set(selectedArticles.map((article) => article.client_id ?? '')),
+    [selectedArticles]
+  )
+
+  const allVisibleSelected =
+    selectableFiltered.length > 0 &&
+    selectableFiltered.every((article) => selectedIds.has(article.id))
+
+  const assignClientId =
+    selectedClientIds.size === 1 ? [...selectedClientIds][0] : ''
+
+  const assignSubtotal = roundMoney(
+    selectedArticles.reduce(
+      (total, article) => total + unitCost(article) * unitQuantity(article),
+      0
+    )
+  )
+
+  function toggleRow(id: string) {
+    setSelectedIds((current) => {
+      const next = new Set(current)
+      if (next.has(id)) {
+        next.delete(id)
+      } else {
+        next.add(id)
+      }
+      return next
+    })
+  }
+
+  function toggleAllVisible() {
+    setSelectedIds((current) => {
+      const next = new Set(current)
+
+      if (allVisibleSelected) {
+        for (const article of selectableFiltered) {
+          next.delete(article.id)
+        }
+      } else {
+        for (const article of selectableFiltered) {
+          next.add(article.id)
+        }
+      }
+
+      return next
+    })
+  }
+
+  function openCreateDialog() {
+    setForm({
+      ...EMPTY_FORM,
+      client_id: clients[0]?.id ?? '',
+      status_code: statuses[0]?.status_code ?? '',
+    })
+    setFormError(null)
+    setDialog({ mode: 'create' })
+  }
+
+  function openEditDialog(row: ArticleRow) {
+    setForm({
+      client_id: row.client_id ?? '',
+      department_id: row.department_id ?? '',
+      contact_id: row.contact_id ?? '',
+      article_description: displayDescription(row),
+      vendor_id: row.vendor_id ?? '',
+      cost_price: String(unitCost(row)),
+      quantity: String(unitQuantity(row)),
+      urgency: normalizeUrgency(row.urgency),
+      status_code: row.status_code ?? statuses[0]?.status_code ?? '',
+      request_date: row.request_date?.slice(0, 10) ?? new Date().toISOString().slice(0, 10),
+    })
+    setFormError(null)
+    setDialog({ mode: 'edit', row })
+  }
+
+  function updateForm<K extends keyof FormState>(key: K, value: FormState[K]) {
+    setForm((current) => ({ ...current, [key]: value }))
+  }
+
+  function handleClientChange(clientId: string) {
+    setForm((current) => {
+      const department = departments.find((item) => item.id === current.department_id)
+      const contact = contacts.find((item) => item.id === current.contact_id)
+
+      return {
+        ...current,
+        client_id: clientId,
+        department_id: department?.client_id === clientId ? current.department_id : '',
+        contact_id: contact?.client_id === clientId ? current.contact_id : '',
+      }
+    })
+  }
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+
+    if (!dialog) {
+      return
+    }
+
+    const description = form.article_description.trim()
+    const costPrice = Number(form.cost_price)
+    const quantity = Number(form.quantity)
+
+    if (!form.client_id) {
+      setFormError('Select a client for this article request.')
+      return
+    }
+
+    if (!description) {
+      setFormError('Add a short description of the article.')
+      return
+    }
+
+    if (!Number.isFinite(costPrice) || costPrice < 0) {
+      setFormError('Cost price must be zero or a positive number.')
+      return
+    }
+
+    if (!Number.isFinite(quantity) || quantity < 1) {
+      setFormError('Quantity must be at least 1.')
+      return
+    }
+
+    if (!hasSupabaseEnv()) {
+      setFormError(SUPABASE_SETUP_MESSAGE)
+      return
+    }
+
+    setSaving(true)
+    setFormError(null)
+
+    const payload = {
+      client_id: form.client_id,
+      department_id: form.department_id || null,
+      vendor_id: form.vendor_id || null,
+      article_description: description,
+      cost_price: roundMoney(costPrice),
+      quantity: Math.trunc(quantity),
+      urgency: form.urgency,
+      status_code: form.status_code || null,
+      request_date: form.request_date || null,
+    }
+
+    try {
+      const supabase = createClient()
+
+      const runSave = async (body: Record<string, unknown>) =>
+        dialog.mode === 'edit'
+          ? supabase.from('article_requests').update(body).eq('id', dialog.row.id)
+          : supabase.from('article_requests').insert(body)
+
+      let result = await runSave({ ...payload, contact_id: form.contact_id || null })
+
+      if (result.error && isMissingColumnError(result.error)) {
+        const { contact_id: _contactId, ...withoutContact } = {
+          ...payload,
+          contact_id: form.contact_id || null,
+        }
+        result = await runSave(withoutContact)
+      }
+
+      if (result.error) {
+        throw result.error
+      }
+
+      setDialog(null)
+      setNotice({
+        tone: 'success',
+        message:
+          dialog.mode === 'edit'
+            ? `“${description}” was updated.`
+            : `“${description}” was added.`,
+      })
+      await loadData({ silent: true })
+    } catch (error) {
+      setFormError(getErrorMessage(error, 'Unable to save the article request.'))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function handleStatusChange(row: ArticleRow, nextStatus: string) {
+    if (!hasSupabaseEnv()) {
+      setNotice({ tone: 'error', message: SUPABASE_SETUP_MESSAGE })
+      return
+    }
+
+    const previous = row.status_code
+    setStatusSavingId(row.id)
+    setArticles((current) =>
+      current.map((article) =>
+        article.id === row.id ? { ...article, status_code: nextStatus || null } : article
+      )
+    )
+
+    try {
+      const supabase = createClient()
+      const { error } = await supabase
+        .from('article_requests')
+        .update({ status_code: nextStatus || null })
+        .eq('id', row.id)
+
+      if (error) {
+        throw error
+      }
+
+      setNotice({
+        tone: 'success',
+        message: `Status updated to ${statusLabels.get(nextStatus) ?? nextStatus}.`,
+      })
+    } catch (error) {
+      setArticles((current) =>
+        current.map((article) =>
+          article.id === row.id ? { ...article, status_code: previous } : article
+        )
+      )
+      setNotice({
+        tone: 'error',
+        message: getErrorMessage(error, 'Unable to update the status.'),
+      })
+    } finally {
+      setStatusSavingId(null)
+    }
+  }
+
+  async function handleDelete() {
+    if (!deleteTarget) {
+      return
+    }
+
+    if (!hasSupabaseEnv()) {
+      setDeleteError(SUPABASE_SETUP_MESSAGE)
+      return
+    }
+
+    setDeleting(true)
+    setDeleteError(null)
+
+    try {
+      const supabase = createClient()
+      const { error } = await supabase.from('article_requests').delete().eq('id', deleteTarget.id)
+
+      if (error) {
+        throw error
+      }
+
+      setNotice({ tone: 'success', message: 'Article request deleted.' })
+      setDeleteTarget(null)
+      setSelectedIds((current) => {
+        const next = new Set(current)
+        next.delete(deleteTarget.id)
+        return next
+      })
+      await loadData({ silent: true })
+    } catch (error) {
+      setDeleteError(getErrorMessage(error, 'Unable to delete the article request.'))
+    } finally {
+      setDeleting(false)
+    }
+  }
+
+  return (
+    <div className="space-y-5">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-brand-700">
+            Workspace
+          </p>
+          <h1 className="mt-1 text-2xl font-semibold tracking-tight text-slate-900">
+            Article Requests
+          </h1>
+          <p className="mt-1 max-w-2xl text-sm text-slate-600">
+            Capture every request, track its lifecycle status and group unbilled items into a
+            proforma invoice.
+          </p>
+        </div>
+
+        <button type="button" onClick={openCreateDialog} className={primaryButtonClass}>
+          <Plus className="h-4 w-4" />
+          New article request
+        </button>
+      </div>
+
+      {notice && (
+        <Alert tone={notice.tone} onDismiss={() => setNotice(null)}>
+          {notice.message}
+        </Alert>
+      )}
+
+      <div className={`overflow-hidden ${cardClass}`}>
+        <div className="space-y-3 border-b border-slate-200 px-4 py-3">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div className="relative w-full lg:max-w-sm">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+              <input
+                type="search"
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="Search article, client, vendor or contact"
+                aria-label="Search article requests"
+                className={`${inputClass} pl-9`}
+              />
+            </div>
+
+            <div className="flex items-center justify-between gap-3 lg:justify-end">
+              <p className="text-xs text-slate-500">
+                {filteredArticles.length} of {articles.length}{' '}
+                {articles.length === 1 ? 'request' : 'requests'}
+              </p>
+              <button
+                type="button"
+                onClick={() => void loadData()}
+                disabled={loading}
+                className={`${secondaryButtonClass} px-2.5 py-1.5`}
+              >
+                {loading ? <SpinnerIcon className="h-4 w-4" /> : <RefreshCw className="h-4 w-4" />}
+                <span className="hidden sm:inline">Refresh</span>
+              </button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-5">
+            <FilterSelect label="Client" value={clientFilter} onChange={setClientFilter}>
+              <option value="">All clients</option>
+              {clients.map((client) => (
+                <option key={client.id} value={client.id}>
+                  {client.company_name}
+                </option>
+              ))}
+            </FilterSelect>
+
+            <FilterSelect label="Department" value={departmentFilter} onChange={setDepartmentFilter}>
+              <option value="">All departments</option>
+              {filterDepartments.map((department) => (
+                <option key={department.id} value={department.id}>
+                  {department.department_name}
+                </option>
+              ))}
+            </FilterSelect>
+
+            <FilterSelect label="Vendor" value={vendorFilter} onChange={setVendorFilter}>
+              <option value="">All vendors</option>
+              {vendors.map((vendor) => (
+                <option key={vendor.id} value={vendor.id}>
+                  {vendor.vendor_name}
+                </option>
+              ))}
+            </FilterSelect>
+
+            <FilterSelect label="Urgency" value={urgencyFilter} onChange={setUrgencyFilter}>
+              <option value="">All urgency</option>
+              {URGENCIES.map((urgency) => (
+                <option key={urgency} value={urgency}>
+                  {titleCase(urgency)}
+                </option>
+              ))}
+            </FilterSelect>
+
+            <FilterSelect label="Status" value={statusFilter} onChange={setStatusFilter}>
+              <option value="">All statuses</option>
+              {statuses.map((status) => (
+                <option key={status.status_code} value={status.status_code}>
+                  {status.status_label}
+                </option>
+              ))}
+            </FilterSelect>
+          </div>
+        </div>
+
+        {selectedArticles.length > 0 && (
+          <div className="flex flex-col gap-2 border-b border-brand-200 bg-brand-50/60 px-4 py-2.5 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-sm font-medium text-brand-800">
+              {selectedArticles.length} selected · {formatCurrency(assignSubtotal)} total cost
+              {selectedClientIds.size > 1 && (
+                <span className="ml-2 font-normal text-rose-600">
+                  Select requests for a single client to create a proforma invoice.
+                </span>
+              )}
+            </p>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setSelectedIds(new Set())}
+                className={`${secondaryButtonClass} px-2.5 py-1.5`}
+              >
+                Clear
+              </button>
+              <button
+                type="button"
+                onClick={() => setAssignOpen(true)}
+                disabled={selectedClientIds.size !== 1}
+                className={`${primaryButtonClass} px-3 py-1.5`}
+              >
+                <WalletCards className="h-4 w-4" />
+                Add to proforma invoice
+              </button>
+            </div>
+          </div>
+        )}
+
+        {loadError && articles.length > 0 && (
+          <div className="border-b border-slate-200 px-4 py-3">
+            <Alert tone="error" onDismiss={() => setLoadError(null)}>
+              {loadError}
+            </Alert>
+          </div>
+        )}
+
+        {loading ? (
+          <TableSkeleton />
+        ) : loadError && articles.length === 0 ? (
+          <div className="px-6 py-12 text-center">
+            <p className="text-sm font-semibold text-red-700">Could not load article requests</p>
+            <p className="mx-auto mt-1 max-w-lg text-sm text-slate-500">{loadError}</p>
+            <button
+              type="button"
+              onClick={() => void loadData()}
+              className={`${secondaryButtonClass} mt-4`}
+            >
+              <RefreshCw className="h-4 w-4" />
+              Try again
+            </button>
+          </div>
+        ) : filteredArticles.length === 0 ? (
+          <div className="px-6 py-14 text-center">
+            <FileText className="mx-auto h-10 w-10 text-slate-300" />
+            <p className="mt-3 text-sm font-medium text-slate-900">
+              {articles.length === 0 ? 'No article requests yet' : 'No matching requests'}
+            </p>
+            <p className="mt-1 text-sm text-slate-500">
+              {articles.length === 0
+                ? 'Create the first request or import a spreadsheet from the proforma page.'
+                : 'Try a different search or clear the filters.'}
+            </p>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="min-w-[1200px] divide-y divide-slate-200 text-sm">
+              <caption className="sr-only">Article requests</caption>
+              <thead className="bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                <tr>
+                  <th scope="col" className="w-10 px-3 py-3">
+                    <input
+                      type="checkbox"
+                      checked={allVisibleSelected}
+                      onChange={toggleAllVisible}
+                      aria-label="Select all visible requests"
+                      className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+                    />
+                  </th>
+                  <th scope="col" className="px-3 py-3">
+                    Requested
+                  </th>
+                  <th scope="col" className="px-3 py-3">
+                    Client
+                  </th>
+                  <th scope="col" className="px-3 py-3">
+                    Department
+                  </th>
+                  <th scope="col" className="px-3 py-3">
+                    Contact
+                  </th>
+                  <th scope="col" className="px-3 py-3">
+                    Article
+                  </th>
+                  <th scope="col" className="px-3 py-3">
+                    Vendor
+                  </th>
+                  <th scope="col" className="px-3 py-3 text-right">
+                    Cost
+                  </th>
+                  <th scope="col" className="px-3 py-3 text-right">
+                    Qty
+                  </th>
+                  <th scope="col" className="px-3 py-3 text-right">
+                    Total cost
+                  </th>
+                  <th scope="col" className="px-3 py-3">
+                    Urgency
+                  </th>
+                  <th scope="col" className="px-3 py-3">
+                    Status
+                  </th>
+                  <th scope="col" className="px-3 py-3 text-right">
+                    Actions
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {filteredArticles.map((article) => {
+                  const urgency = normalizeUrgency(article.urgency)
+                  const cost = unitCost(article)
+                  const quantity = unitQuantity(article)
+                  const selected = selectedIds.has(article.id)
+                  const canBill = !article.tax_invoice_id && !article.proforma_invoice_id
+
+                  return (
+                    <tr
+                      key={article.id}
+                      className={selected ? 'bg-brand-50/50' : 'transition-colors hover:bg-slate-50/70'}
+                    >
+                      <td className="px-3 py-3">
+                        <input
+                          type="checkbox"
+                          checked={selected}
+                          disabled={!canBill}
+                          onChange={() => toggleRow(article.id)}
+                          aria-label={`Select ${displayDescription(article)}`}
+                          className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500 disabled:cursor-not-allowed disabled:opacity-40"
+                        />
+                      </td>
+                      <td className="whitespace-nowrap px-3 py-3 text-slate-600">
+                        {formatDate(article.request_date ?? article.created_at)}
+                      </td>
+                      <td className="px-3 py-3 font-medium text-slate-900">
+                        {article.client_id
+                          ? clientNames.get(article.client_id) ?? 'Unknown client'
+                          : '—'}
+                      </td>
+                      <td className="px-3 py-3 text-slate-600">
+                        {article.department_id
+                          ? departmentNames.get(article.department_id) ?? '—'
+                          : '—'}
+                      </td>
+                      <td className="px-3 py-3 text-slate-600">
+                        {article.contact_id
+                          ? contactNames.get(article.contact_id) ?? '—'
+                          : '—'}
+                      </td>
+                      <td className="max-w-[18rem] px-3 py-3">
+                        <p className="truncate font-medium text-slate-900" title={displayDescription(article)}>
+                          {displayDescription(article)}
+                        </p>
+                        <div className="mt-0.5 flex flex-wrap items-center gap-1">
+                          {article.proforma_invoice_id && (
+                            <span className="inline-flex items-center rounded bg-indigo-50 px-1.5 py-0.5 text-[10px] font-medium text-indigo-700">
+                              On proforma
+                            </span>
+                          )}
+                          {article.tax_invoice_id && (
+                            <span className="inline-flex items-center rounded bg-emerald-50 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700">
+                              Tax invoiced
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-3 py-3 text-slate-600">
+                        {article.vendor_id ? vendorNames.get(article.vendor_id) ?? '—' : '—'}
+                      </td>
+                      <td className="whitespace-nowrap px-3 py-3 text-right tabular-nums text-slate-600">
+                        {formatCurrency(cost)}
+                      </td>
+                      <td className="px-3 py-3 text-right tabular-nums text-slate-600">{quantity}</td>
+                      <td className="whitespace-nowrap px-3 py-3 text-right font-medium tabular-nums text-slate-900">
+                        {formatCurrency(roundMoney(cost * quantity))}
+                      </td>
+                      <td className="px-3 py-3">
+                        <span className={`${badgeClass} ${URGENCY_TONES[urgency] ?? URGENCY_TONES.MEDIUM}`}>
+                          {titleCase(urgency)}
+                        </span>
+                      </td>
+                      <td className="px-3 py-3">
+                        <div className="relative">
+                          <select
+                            value={article.status_code ?? ''}
+                            onChange={(event) => void handleStatusChange(article, event.target.value)}
+                            disabled={statusSavingId === article.id}
+                            aria-label={`Change status for ${displayDescription(article)}`}
+                            className={`w-full min-w-36 cursor-pointer appearance-none rounded-full border-0 py-1 pl-2.5 pr-7 text-xs font-semibold outline-none ring-1 ring-inset focus:ring-2 focus:ring-brand-500 disabled:opacity-60 ${
+                              STATUS_TONES[article.status_code ?? ''] ??
+                              'bg-slate-100 text-slate-600 ring-slate-500/20'
+                            }`}
+                          >
+                            <option value="">Unassigned</option>
+                            {statuses.map((status) => (
+                              <option key={status.status_code} value={status.status_code}>
+                                {status.status_label}
+                              </option>
+                            ))}
+                          </select>
+                          <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-[10px] opacity-70">
+                            ▾
+                          </span>
+                        </div>
+                      </td>
+                      <td className="px-3 py-3">
+                        <div className="flex items-center justify-end gap-1">
+                          <button
+                            type="button"
+                            onClick={() => openEditDialog(article)}
+                            className={rowActionClass}
+                            aria-label={`Edit ${displayDescription(article)}`}
+                          >
+                            <Pencil className="h-3.5 w-3.5" />
+                            Edit
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setDeleteError(null)
+                              setDeleteTarget(article)
+                            }}
+                            className={rowDangerActionClass}
+                            aria-label={`Delete ${displayDescription(article)}`}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      <Modal
+        open={dialog !== null}
+        onClose={() => {
+          if (!saving) {
+            setDialog(null)
+            setFormError(null)
+          }
+        }}
+        size="3xl"
+        title={dialog?.mode === 'edit' ? 'Edit article request' : 'New article request'}
+        description="Track the article, supplier cost and the lifecycle stage in one place."
+      >
+        <form onSubmit={handleSubmit} className="space-y-4">
+          {formError && <Alert tone="error">{formError}</Alert>}
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div>
+              <label htmlFor="article-client" className={labelClass}>
+                Client <span className="text-red-500">*</span>
+              </label>
+              <select
+                id="article-client"
+                value={form.client_id}
+                onChange={(event) => handleClientChange(event.target.value)}
+                required
+                className={inputClass}
+              >
+                <option value="">Select a client</option>
+                {clients.map((client) => (
+                  <option key={client.id} value={client.id}>
+                    {client.company_name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label htmlFor="article-department" className={labelClass}>
+                Department
+              </label>
+              <select
+                id="article-department"
+                value={form.department_id}
+                onChange={(event) => updateForm('department_id', event.target.value)}
+                disabled={!form.client_id || formDepartments.length === 0}
+                className={inputClass}
+              >
+                <option value="">
+                  {!form.client_id
+                    ? 'Select a client first'
+                    : formDepartments.length === 0
+                      ? 'No departments for this client'
+                      : 'No department'}
+                </option>
+                {formDepartments.map((department) => (
+                  <option key={department.id} value={department.id}>
+                    {department.department_name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label htmlFor="article-contact" className={labelClass}>
+                Contact person
+              </label>
+              <select
+                id="article-contact"
+                value={form.contact_id}
+                onChange={(event) => updateForm('contact_id', event.target.value)}
+                disabled={!form.client_id || formContacts.length === 0}
+                className={inputClass}
+              >
+                <option value="">
+                  {!form.client_id
+                    ? 'Select a client first'
+                    : formContacts.length === 0
+                      ? 'No contacts for this client'
+                      : 'No contact'}
+                </option>
+                {formContacts.map((contact) => (
+                  <option key={contact.id} value={contact.id}>
+                    {contact.contact_name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label htmlFor="article-vendor" className={labelClass}>
+                Vendor
+              </label>
+              <select
+                id="article-vendor"
+                value={form.vendor_id}
+                onChange={(event) => updateForm('vendor_id', event.target.value)}
+                className={inputClass}
+              >
+                <option value="">No vendor</option>
+                {vendors.map((vendor) => (
+                  <option key={vendor.id} value={vendor.id}>
+                    {vendor.vendor_name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div>
+            <label htmlFor="article-description" className={labelClass}>
+              Article description <span className="text-red-500">*</span>
+            </label>
+            <textarea
+              id="article-description"
+              value={form.article_description}
+              onChange={(event) => updateForm('article_description', event.target.value)}
+              required
+              rows={2}
+              maxLength={400}
+              placeholder="e.g. Phase III clinical trial reprint — 50 copies"
+              className={`${inputClass} resize-y`}
+            />
+          </div>
+
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <div>
+              <label htmlFor="article-cost" className={labelClass}>
+                Cost price (₹)
+              </label>
+              <input
+                id="article-cost"
+                type="number"
+                min={0}
+                step="0.01"
+                value={form.cost_price}
+                onChange={(event) => updateForm('cost_price', event.target.value)}
+                className={`${inputClass} tabular-nums`}
+              />
+            </div>
+
+            <div>
+              <label htmlFor="article-quantity" className={labelClass}>
+                Quantity
+              </label>
+              <input
+                id="article-quantity"
+                type="number"
+                min={1}
+                step={1}
+                value={form.quantity}
+                onChange={(event) => updateForm('quantity', event.target.value)}
+                className={`${inputClass} tabular-nums`}
+              />
+            </div>
+
+            <div>
+              <label htmlFor="article-urgency" className={labelClass}>
+                Urgency
+              </label>
+              <select
+                id="article-urgency"
+                value={form.urgency}
+                onChange={(event) => updateForm('urgency', event.target.value)}
+                className={inputClass}
+              >
+                {URGENCIES.map((urgency) => (
+                  <option key={urgency} value={urgency}>
+                    {titleCase(urgency)}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label htmlFor="article-date" className={labelClass}>
+                Request date
+              </label>
+              <input
+                id="article-date"
+                type="date"
+                value={form.request_date}
+                onChange={(event) => updateForm('request_date', event.target.value)}
+                className={inputClass}
+              />
+            </div>
+          </div>
+
+          <div>
+            <label htmlFor="article-status" className={labelClass}>
+              Lifecycle status
+            </label>
+            <select
+              id="article-status"
+              value={form.status_code}
+              onChange={(event) => updateForm('status_code', event.target.value)}
+              className={inputClass}
+            >
+              <option value="">Unassigned</option>
+              {statuses.map((status) => (
+                <option key={status.status_code} value={status.status_code}>
+                  {status.status_label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="flex flex-col gap-2 rounded-xl bg-slate-50 px-3.5 py-2.5 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-sm text-slate-600">Total cost</p>
+            <p className="text-base font-semibold tabular-nums text-slate-900">
+              {formatCurrency(
+                roundMoney(
+                  (Number.isFinite(Number(form.cost_price)) ? Number(form.cost_price) : 0) *
+                    (Number.isFinite(Number(form.quantity)) ? Number(form.quantity) : 0)
+                )
+              )}
+            </p>
+          </div>
+
+          <div className="flex justify-end gap-2 border-t border-slate-200 pt-4">
+            <button
+              type="button"
+              onClick={() => setDialog(null)}
+              disabled={saving}
+              className={secondaryButtonClass}
+            >
+              Cancel
+            </button>
+            <button type="submit" disabled={saving} className={primaryButtonClass}>
+              {saving && <SpinnerIcon className="h-4 w-4" />}
+              {saving ? 'Saving…' : dialog?.mode === 'edit' ? 'Save changes' : 'Add request'}
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+      <AssignProformaDialog
+        open={assignOpen}
+        onClose={() => setAssignOpen(false)}
+        clientId={assignClientId}
+        clientName={assignClientId ? clientNames.get(assignClientId) ?? 'Client' : 'Client'}
+        articles={selectedArticles.map((article) => ({
+          id: article.id,
+          description: displayDescription(article),
+          amount: roundMoney(unitCost(article) * unitQuantity(article)),
+        }))}
+        onAssigned={async (message) => {
+          setAssignOpen(false)
+          setSelectedIds(new Set())
+          setNotice({ tone: 'success', message })
+          await loadData({ silent: true })
+        }}
+      />
+
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        title={`Delete “${deleteTarget ? displayDescription(deleteTarget) : 'article request'}”?`}
+        message="This permanently removes the article request. Invoices that reference it may block the delete."
+        busy={deleting}
+        error={deleteError}
+        onCancel={() => {
+          if (!deleting) {
+            setDeleteTarget(null)
+            setDeleteError(null)
+          }
+        }}
+        onConfirm={() => void handleDelete()}
+      />
+    </div>
+  )
+}
+
+function FilterSelect({
+  label,
+  value,
+  onChange,
+  children,
+}: {
+  label: string
+  value: string
+  onChange: (value: string) => void
+  children: React.ReactNode
+}) {
+  return (
+    <label className="block">
+      <span className="sr-only">{label}</span>
+      <select
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        aria-label={`Filter by ${label.toLowerCase()}`}
+        className={`${inputClass} py-1.5 text-xs`}
+      >
+        {children}
+      </select>
+    </label>
+  )
+}
+
+function displayDescription(article: ArticleRow): string {
+  if (article.article_description?.trim()) {
+    return article.article_description.trim()
+  }
+
+  return getArticleTitle(article as ArticleRequestRow)
+}
+
+function unitCost(article: ArticleRow): number {
+  if (typeof article.cost_price === 'number' && Number.isFinite(article.cost_price)) {
+    return article.cost_price
+  }
+
+  return getArticleRate(article as ArticleRequestRow)
+}
+
+function unitQuantity(article: ArticleRow): number {
+  if (typeof article.quantity === 'number' && Number.isFinite(article.quantity) && article.quantity > 0) {
+    return article.quantity
+  }
+
+  return 1
+}
+
+function normalizeUrgency(value: string | null | undefined): string {
+  const normalized = (value ?? '').toUpperCase()
+
+  return (URGENCIES as readonly string[]).includes(normalized) ? normalized : 'MEDIUM'
+}
+
+function titleCase(value: string): string {
+  return value
+    .toLowerCase()
+    .split(/[\s_]+/)
+    .filter(Boolean)
+    .map((part) => part.slice(0, 1).toUpperCase() + part.slice(1))
+    .join(' ')
+}
+
+function TableSkeleton() {
+  return (
+    <div className="divide-y divide-slate-100" aria-hidden="true">
+      {Array.from({ length: 6 }).map((_, index) => (
+        <div key={index} className="flex items-center gap-4 px-4 py-4">
+          <div className="h-4 w-4 animate-pulse rounded bg-slate-100" />
+          <div className="h-4 flex-1 animate-pulse rounded bg-slate-100" />
+          <div className="hidden h-4 w-32 animate-pulse rounded bg-slate-100 sm:block" />
+          <div className="hidden h-4 w-24 animate-pulse rounded bg-slate-100 lg:block" />
+          <div className="h-6 w-20 animate-pulse rounded-full bg-slate-100" />
+        </div>
+      ))}
+    </div>
+  )
+}

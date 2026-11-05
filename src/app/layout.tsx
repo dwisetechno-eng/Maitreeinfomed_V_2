@@ -2,7 +2,7 @@ import type { Metadata } from 'next'
 import { Inter } from 'next/font/google'
 import type { ReactNode } from 'react'
 
-import { Header, type HeaderUser } from '@/components/layout/header'
+import { AppShell, type AppUser } from '@/components/layout/app-shell'
 import { createClient } from '@/utils/supabase/server'
 
 import './globals.css'
@@ -22,7 +22,7 @@ export const metadata: Metadata = {
     'Track scientific article requests, proforma invoices and tax invoices for Maitree Infomed.',
 }
 
-async function getCurrentUser(): Promise<HeaderUser | null> {
+async function getCurrentUser(): Promise<AppUser | null> {
   if (
     !process.env.NEXT_PUBLIC_SUPABASE_URL ||
     !process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
@@ -71,20 +71,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
   return (
     <html lang="en" className={inter.variable}>
       <body className="min-h-screen bg-slate-50 font-sans text-slate-900 antialiased">
-        <div className="flex min-h-screen flex-col">
-          <Header user={user} />
-
-          <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-8 sm:px-6 lg:px-8">
-            {children}
-          </main>
-
-          <footer className="border-t border-slate-200 bg-white">
-            <div className="mx-auto flex max-w-7xl flex-col gap-1 px-4 py-4 text-xs text-slate-500 sm:flex-row sm:items-center sm:justify-between sm:px-6 lg:px-8">
-              <p>© {new Date().getFullYear()} Maitree Infomed. All rights reserved.</p>
-              <p>Scientific Hub</p>
-            </div>
-          </footer>
-        </div>
+        <AppShell user={user}>{children}</AppShell>
       </body>
     </html>
   )

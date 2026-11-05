@@ -312,13 +312,13 @@ export function PartyMasterManager({ kind }: { kind: PartyKind }) {
     <div className="space-y-5">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-emerald-300">
+          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-brand-700">
             Masters
           </p>
-          <h1 className="mt-1 text-2xl font-semibold tracking-tight text-slate-100">
+          <h1 className="mt-1 text-2xl font-semibold tracking-tight text-slate-900">
             {config.title}
           </h1>
-          <p className="mt-1 max-w-2xl text-sm text-slate-400">{config.description}</p>
+          <p className="mt-1 max-w-2xl text-sm text-slate-600">{config.description}</p>
         </div>
 
         <button type="button" onClick={openCreateDialog} className={primaryButtonClass}>
@@ -333,10 +333,10 @@ export function PartyMasterManager({ kind }: { kind: PartyKind }) {
         </Alert>
       )}
 
-      <div className="overflow-hidden rounded-2xl border border-white/10 bg-slate-900 shadow-sm">
-        <div className="flex flex-col gap-3 border-b border-white/10 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+      <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <div className="flex flex-col gap-3 border-b border-slate-200 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="relative w-full sm:max-w-xs">
-            <SearchIcon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
+            <SearchIcon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
             <input
               type="search"
               value={query}
@@ -348,7 +348,7 @@ export function PartyMasterManager({ kind }: { kind: PartyKind }) {
           </div>
 
           <div className="flex items-center justify-between gap-3 sm:justify-end">
-            <p className="text-xs text-slate-400">
+            <p className="text-xs text-slate-500">
               {filteredRows.length} of {rows.length}{' '}
               {rows.length === 1 ? config.singular : config.title.toLowerCase()}
             </p>
@@ -369,7 +369,7 @@ export function PartyMasterManager({ kind }: { kind: PartyKind }) {
         </div>
 
         {loadError && rows.length > 0 && (
-          <div className="border-b border-white/10 px-4 py-3">
+          <div className="border-b border-slate-200 px-4 py-3">
             <Alert tone="error" onDismiss={() => setLoadError(null)}>
               {loadError}
             </Alert>
@@ -380,8 +380,8 @@ export function PartyMasterManager({ kind }: { kind: PartyKind }) {
           <PartyTableSkeleton columns={config.hasContactPerson ? 7 : 6} />
         ) : loadError && rows.length === 0 ? (
           <div className="px-6 py-12 text-center">
-            <p className="text-sm font-semibold text-rose-300">Could not load {config.title.toLowerCase()}</p>
-            <p className="mx-auto mt-1 max-w-lg text-sm text-slate-400">{loadError}</p>
+            <p className="text-sm font-semibold text-red-700">Could not load {config.title.toLowerCase()}</p>
+            <p className="mx-auto mt-1 max-w-lg text-sm text-slate-500">{loadError}</p>
             <button
               type="button"
               onClick={() => void loadRows()}
@@ -393,11 +393,11 @@ export function PartyMasterManager({ kind }: { kind: PartyKind }) {
           </div>
         ) : filteredRows.length === 0 ? (
           <div className="px-6 py-14 text-center">
-            <InboxIcon className="mx-auto h-10 w-10 text-slate-600" />
-            <p className="mt-3 text-sm font-medium text-slate-100">
+            <InboxIcon className="mx-auto h-10 w-10 text-slate-300" />
+            <p className="mt-3 text-sm font-medium text-slate-900">
               {rows.length === 0 ? `No ${config.title.toLowerCase()} yet` : 'No matching records'}
             </p>
-            <p className="mt-1 text-sm text-slate-400">
+            <p className="mt-1 text-sm text-slate-500">
               {rows.length === 0
                 ? `Add your first ${config.singular} to get started.`
                 : `Nothing matches “${query.trim()}”. Try a different search.`}
@@ -405,9 +405,9 @@ export function PartyMasterManager({ kind }: { kind: PartyKind }) {
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-white/10 text-sm">
+            <table className="min-w-full divide-y divide-slate-200 text-sm">
               <caption className="sr-only">{config.title} records</caption>
-              <thead className="bg-white/[0.04] text-left text-xs font-semibold uppercase tracking-wide text-slate-400">
+              <thead className="bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
                 <tr>
                   <th scope="col" className="px-4 py-3">
                     {config.nameLabel}
@@ -434,23 +434,23 @@ export function PartyMasterManager({ kind }: { kind: PartyKind }) {
                   </th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-white/5">
+              <tbody className="divide-y divide-slate-100">
                 {filteredRows.map((row) => {
                   const name = getPartyName(row, config.nameField)
 
                   return (
-                    <tr key={row.id} className="transition-colors hover:bg-white/5">
-                      <td className="px-4 py-3 font-medium text-slate-100">{name}</td>
+                    <tr key={row.id} className="transition-colors hover:bg-slate-50/70">
+                      <td className="px-4 py-3 font-medium text-slate-900">{name}</td>
                       {config.hasContactPerson && (
-                        <td className="px-4 py-3 text-slate-400">
+                        <td className="px-4 py-3 text-slate-600">
                           {row.contact_person || '—'}
                         </td>
                       )}
-                      <td className="px-4 py-3 text-slate-400">
+                      <td className="px-4 py-3 text-slate-600">
                         {row.email ? (
                           <a
                             href={`mailto:${row.email}`}
-                            className="text-emerald-300 hover:underline"
+                            className="text-brand-700 hover:underline"
                           >
                             {row.email}
                           </a>
@@ -458,7 +458,7 @@ export function PartyMasterManager({ kind }: { kind: PartyKind }) {
                           '—'
                         )}
                       </td>
-                      <td className="whitespace-nowrap px-4 py-3 text-slate-400">
+                      <td className="whitespace-nowrap px-4 py-3 text-slate-600">
                         {row.phone ? (
                           <a href={`tel:${row.phone}`} className="hover:underline">
                             {row.phone}
@@ -467,10 +467,10 @@ export function PartyMasterManager({ kind }: { kind: PartyKind }) {
                           '—'
                         )}
                       </td>
-                      <td className="px-4 py-3 font-mono text-xs text-slate-400">
+                      <td className="px-4 py-3 font-mono text-xs text-slate-600">
                         {row.gstin || '—'}
                       </td>
-                      <td className="whitespace-nowrap px-4 py-3 text-slate-400">
+                      <td className="whitespace-nowrap px-4 py-3 text-slate-500">
                         {formatDate(row.created_at)}
                       </td>
                       <td className="px-4 py-3">
@@ -523,7 +523,7 @@ export function PartyMasterManager({ kind }: { kind: PartyKind }) {
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="sm:col-span-2">
               <label htmlFor="party-name" className={labelClass}>
-                {config.nameLabel} <span className="text-rose-400">*</span>
+                {config.nameLabel} <span className="text-red-500">*</span>
               </label>
               <input
                 id="party-name"
@@ -601,7 +601,7 @@ export function PartyMasterManager({ kind }: { kind: PartyKind }) {
             </div>
           </div>
 
-          <div className="flex justify-end gap-2 border-t border-white/10 pt-4">
+          <div className="flex justify-end gap-2 border-t border-slate-200 pt-4">
             <button
               type="button"
               onClick={closeDialog}
@@ -646,7 +646,7 @@ function getPartyName(row: PartyRow, nameField: PartyConfig['nameField']) {
 
 function PartyTableSkeleton({ columns }: { columns: number }) {
   return (
-    <div className="divide-y divide-white/5" aria-hidden="true">
+    <div className="divide-y divide-slate-100" aria-hidden="true">
       {Array.from({ length: 4 }).map((_, rowIndex) => (
         <div
           key={rowIndex}
@@ -656,7 +656,7 @@ function PartyTableSkeleton({ columns }: { columns: number }) {
           {Array.from({ length: columns }).map((__, columnIndex) => (
             <div
               key={columnIndex}
-              className="h-4 animate-pulse rounded bg-white/5"
+              className="h-4 animate-pulse rounded bg-slate-100"
             />
           ))}
         </div>

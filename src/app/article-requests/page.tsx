@@ -1,10 +1,11 @@
-import { PagePlaceholder } from '@/components/layout/page-placeholder'
+import type { Metadata } from 'next'
+
+import { ArticleRequestManager } from '@/components/article-requests/article-request-manager'
+
+export const metadata: Metadata = {
+  title: 'Article Requests',
+}
 
 export default function ArticleRequestsPage() {
-  return (
-    <PagePlaceholder
-      title="Article Requests"
-      description="Review and manage incoming scientific article requests."
-    />
-  )
+  return <ArticleRequestManager />
 }

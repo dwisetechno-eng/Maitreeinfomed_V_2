@@ -30,15 +30,15 @@ export function ConfirmDialog({
 }: ConfirmDialogProps) {
   return (
     <Modal open={open} onClose={onCancel} title={title}>
-      <p className="text-sm text-slate-400">{message}</p>
+      <p className="text-sm text-slate-600">{message}</p>
 
       {error && (
-        <p className="mt-3 rounded-lg border border-rose-400/30 bg-rose-500/10 px-3 py-2 text-sm text-rose-300">
+        <p className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
           {error}
         </p>
       )}
 
-      <div className="mt-5 flex justify-end gap-2 border-t border-white/10 pt-4">
+      <div className="mt-5 flex justify-end gap-2 border-t border-slate-200 pt-4">
         <button type="button" onClick={onCancel} disabled={busy} className={secondaryButtonClass}>
           Cancel
         </button>

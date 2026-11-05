@@ -9,8 +9,8 @@ type AlertProps = {
 }
 
 const TONES = {
-  success: 'border-emerald-400/30 bg-emerald-500/10 text-emerald-200',
-  error: 'border-rose-400/30 bg-rose-500/10 text-rose-300',
+  success: 'border-brand-200 bg-brand-50 text-brand-800',
+  error: 'border-red-200 bg-red-50 text-red-700',
 } as const
 
 export function Alert({ tone, children, onDismiss }: AlertProps) {

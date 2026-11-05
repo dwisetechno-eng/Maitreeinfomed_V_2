@@ -551,7 +551,7 @@ export function CreateProformaDialog({ open, onClose, onCreated }: CreateProform
           <div className="grid gap-3 sm:grid-cols-3">
             <div>
               <label htmlFor="proforma-client" className={labelClass}>
-                Client <span className="text-rose-400">*</span>
+                Client <span className="text-red-500">*</span>
               </label>
               <select
                 id="proforma-client"
@@ -622,9 +622,9 @@ export function CreateProformaDialog({ open, onClose, onCreated }: CreateProform
           )}
 
           {!referenceLoading && !referenceError && clients.length === 0 && (
-            <p className="text-xs text-slate-400">
+            <p className="text-xs text-slate-500">
               No clients found. Add one under{' '}
-              <a href="/masters/clients" className="font-medium text-emerald-300 hover:underline">
+              <a href="/masters/clients" className="font-medium text-brand-700 hover:underline">
                 Masters → Clients
               </a>{' '}
               before creating an invoice.
@@ -642,12 +642,12 @@ export function CreateProformaDialog({ open, onClose, onCreated }: CreateProform
 
           <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
             <dl className="grid grid-cols-2 items-center gap-x-8 gap-y-1.5 text-sm sm:grid-cols-[auto_auto]">
-              <dt className="text-slate-400">Subtotal</dt>
-              <dd className="text-right font-medium tabular-nums text-slate-100">
+              <dt className="text-slate-500">Subtotal</dt>
+              <dd className="text-right font-medium tabular-nums text-slate-900">
                 {formatCurrency(subtotal)}
               </dd>
 
-              <dt className="flex items-center gap-2 text-slate-400">
+              <dt className="flex items-center gap-2 text-slate-500">
                 GST
                 <span className="inline-flex items-center gap-1">
                   <input
@@ -659,19 +659,19 @@ export function CreateProformaDialog({ open, onClose, onCreated }: CreateProform
                     onChange={(event) => setTaxRate(event.target.value)}
                     disabled={generating}
                     aria-label="GST rate percentage"
-                    className="w-16 rounded-md border border-white/15 bg-slate-900 px-2 py-1 text-right text-xs tabular-nums text-slate-100 outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-400/20"
+                    className="w-16 rounded-md border border-slate-300 bg-white px-2 py-1 text-right text-xs tabular-nums text-slate-900 outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"
                   />
-                  <span className="text-xs text-slate-400">%</span>
+                  <span className="text-xs text-slate-500">%</span>
                 </span>
               </dt>
-              <dd className="text-right font-medium tabular-nums text-slate-100">
+              <dd className="text-right font-medium tabular-nums text-slate-900">
                 {formatCurrency(taxAmount)}
               </dd>
 
-              <dt className="border-t border-white/15 pt-1.5 font-semibold text-slate-100">
+              <dt className="border-t border-slate-300 pt-1.5 font-semibold text-slate-900">
                 Grand total
               </dt>
-              <dd className="border-t border-white/15 pt-1.5 text-right text-base font-semibold tabular-nums text-slate-100">
+              <dd className="border-t border-slate-300 pt-1.5 text-right text-base font-semibold tabular-nums text-slate-900">
                 {formatCurrency(grandTotal)}
               </dd>
             </dl>
@@ -702,16 +702,16 @@ export function CreateProformaDialog({ open, onClose, onCreated }: CreateProform
           </div>
 
           {selectedClient && selectedRows.length > 0 && (
-            <p className="text-xs text-slate-400">
+            <p className="text-xs text-slate-500">
               {selectedRows.length} request{selectedRows.length === 1 ? '' : 's'} for{' '}
-              <span className="font-medium text-slate-200">{selectedClient.company_name}</span> will
+              <span className="font-medium text-slate-700">{selectedClient.company_name}</span> will
               be linked to this invoice.
             </p>
           )}
         </div>
       }
     >
-      <div className="flex gap-1 rounded-xl bg-white/5 p-1" role="tablist" aria-label="Invoice source">
+      <div className="flex gap-1 rounded-xl bg-slate-100 p-1" role="tablist" aria-label="Invoice source">
         <button
           type="button"
           role="tab"
@@ -752,9 +752,9 @@ export function CreateProformaDialog({ open, onClose, onCreated }: CreateProform
           ) : pendingLoading ? (
             <PendingSkeleton />
           ) : pendingError ? (
-            <div className="rounded-xl border border-rose-400/30 bg-rose-500/10 px-4 py-6 text-center">
-              <p className="text-sm font-semibold text-rose-300">Could not load article requests</p>
-              <p className="mx-auto mt-1 max-w-lg text-sm text-rose-400">{pendingError}</p>
+            <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-6 text-center">
+              <p className="text-sm font-semibold text-red-700">Could not load article requests</p>
+              <p className="mx-auto mt-1 max-w-lg text-sm text-red-600">{pendingError}</p>
               <button
                 type="button"
                 onClick={() => setPendingRefresh((version) => version + 1)}
@@ -780,16 +780,16 @@ export function CreateProformaDialog({ open, onClose, onCreated }: CreateProform
               }
             />
           ) : (
-            <div className="overflow-hidden rounded-xl border border-white/10">
-              <div className="flex items-center justify-between gap-3 border-b border-white/10 bg-white/[0.04] px-3 py-2">
-                <p className="text-xs text-slate-400">
+            <div className="overflow-hidden rounded-xl border border-slate-200">
+              <div className="flex items-center justify-between gap-3 border-b border-slate-200 bg-slate-50 px-3 py-2">
+                <p className="text-xs text-slate-500">
                   {selectedRows.length} of {pendingRows.length} selected
                 </p>
                 <button
                   type="button"
                   onClick={() => setPendingRefresh((version) => version + 1)}
                   disabled={pendingLoading}
-                  className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-slate-400 transition-colors hover:bg-white/10 hover:text-slate-100"
+                  className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-slate-600 transition-colors hover:bg-slate-200/60 hover:text-slate-900"
                 >
                   <RefreshIcon className="h-3.5 w-3.5" />
                   Refresh
@@ -797,9 +797,9 @@ export function CreateProformaDialog({ open, onClose, onCreated }: CreateProform
               </div>
 
               <div className="max-h-[42vh] overflow-auto">
-                <table className="min-w-full divide-y divide-white/10 text-sm">
+                <table className="min-w-full divide-y divide-slate-200 text-sm">
                   <caption className="sr-only">Pending unbilled article requests</caption>
-                  <thead className="sticky top-0 z-10 bg-white/[0.04] text-left text-xs font-semibold uppercase tracking-wide text-slate-400">
+                  <thead className="sticky top-0 z-10 bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
                     <tr>
                       <th scope="col" className="w-10 px-3 py-2.5">
                         <input
@@ -808,7 +808,7 @@ export function CreateProformaDialog({ open, onClose, onCreated }: CreateProform
                           checked={allSelected}
                           onChange={toggleAll}
                           aria-label="Select all pending requests"
-                          className="h-4 w-4 rounded border-white/15 text-emerald-400 focus:ring-emerald-400"
+                          className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
                         />
                       </th>
                       <th scope="col" className="px-3 py-2.5">
@@ -831,7 +831,7 @@ export function CreateProformaDialog({ open, onClose, onCreated }: CreateProform
                       </th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-white/5 bg-slate-900">
+                  <tbody className="divide-y divide-slate-100 bg-white">
                     {pendingRows.map((row) => {
                       const checked = selectedIds.has(row.id)
                       const quantity = getArticleQuantity(row)
@@ -845,7 +845,7 @@ export function CreateProformaDialog({ open, onClose, onCreated }: CreateProform
                       return (
                         <tr
                           key={row.id}
-                          className={checked ? 'bg-emerald-500/[0.08]' : 'transition-colors hover:bg-white/5'}
+                          className={checked ? 'bg-brand-50/60' : 'transition-colors hover:bg-slate-50/70'}
                         >
                           <td className="px-3 py-3">
                             <input
@@ -853,28 +853,28 @@ export function CreateProformaDialog({ open, onClose, onCreated }: CreateProform
                               checked={checked}
                               onChange={() => toggleRow(row.id)}
                               aria-label={`Select ${getArticleTitle(row)}`}
-                              className="h-4 w-4 rounded border-white/15 text-emerald-400 focus:ring-emerald-400"
+                              className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
                             />
                           </td>
                           <td className="max-w-[18rem] px-3 py-3">
-                            <p className="truncate font-medium text-slate-100" title={getArticleTitle(row)}>
+                            <p className="truncate font-medium text-slate-900" title={getArticleTitle(row)}>
                               {getArticleTitle(row)}
                             </p>
                             {meta?.remarks && !row.article_title && (
-                              <p className="truncate text-xs text-slate-400">{meta.remarks}</p>
+                              <p className="truncate text-xs text-slate-500">{meta.remarks}</p>
                             )}
                           </td>
-                          <td className="px-3 py-3 text-slate-400">{vendorName}</td>
-                          <td className="px-3 py-3 text-right tabular-nums text-slate-400">
+                          <td className="px-3 py-3 text-slate-600">{vendorName}</td>
+                          <td className="px-3 py-3 text-right tabular-nums text-slate-600">
                             {quantity}
                           </td>
-                          <td className="px-3 py-3 text-right tabular-nums text-slate-400">
+                          <td className="px-3 py-3 text-right tabular-nums text-slate-600">
                             {formatCurrency(rate)}
                           </td>
-                          <td className="px-3 py-3 text-right font-medium tabular-nums text-slate-100">
+                          <td className="px-3 py-3 text-right font-medium tabular-nums text-slate-900">
                             {formatCurrency(roundMoney(rate * quantity))}
                           </td>
-                          <td className="whitespace-nowrap px-3 py-3 text-slate-400">
+                          <td className="whitespace-nowrap px-3 py-3 text-slate-500">
                             {formatDate(row.request_date ?? row.created_at)}
                           </td>
                         </tr>
@@ -905,10 +905,10 @@ export function CreateProformaDialog({ open, onClose, onCreated }: CreateProform
             onDrop={handleDrop}
             className={`flex cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed px-6 py-10 text-center transition-colors ${
               !selectedClientId
-                ? 'cursor-not-allowed border-white/10 bg-white/[0.04]'
+                ? 'cursor-not-allowed border-slate-200 bg-slate-50'
                 : dragging
-                  ? 'border-brand-500 bg-emerald-500/10'
-                  : 'border-white/15 bg-slate-900 hover:border-emerald-400/50 hover:bg-emerald-500/[0.06]'
+                  ? 'border-brand-500 bg-brand-50'
+                  : 'border-slate-300 bg-white hover:border-brand-400 hover:bg-brand-50/40'
             }`}
             aria-disabled={!selectedClientId || importing}
           >
@@ -927,7 +927,7 @@ export function CreateProformaDialog({ open, onClose, onCreated }: CreateProform
               }}
             />
 
-            <span className="flex h-11 w-11 items-center justify-center rounded-full bg-emerald-500/15 text-emerald-300">
+            <span className="flex h-11 w-11 items-center justify-center rounded-full bg-brand-100 text-brand-700">
               {importing ? (
                 <SpinnerIcon className="h-5 w-5" />
               ) : (
@@ -935,7 +935,7 @@ export function CreateProformaDialog({ open, onClose, onCreated }: CreateProform
               )}
             </span>
 
-            <span className="text-sm font-medium text-slate-100">
+            <span className="text-sm font-medium text-slate-900">
               {importing
                 ? 'Importing articles…'
                 : !selectedClientId
@@ -943,7 +943,7 @@ export function CreateProformaDialog({ open, onClose, onCreated }: CreateProform
                   : 'Drop your .xlsx file here, or click to browse'}
             </span>
 
-            <span className="text-xs text-slate-400">
+            <span className="text-xs text-slate-500">
               {importFile && !importing ? importFile.name : 'One worksheet per file · up to 8 MB'}
             </span>
           </label>
@@ -984,15 +984,15 @@ export function CreateProformaDialog({ open, onClose, onCreated }: CreateProform
             </Alert>
           )}
 
-          <div className="rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3 text-xs text-slate-400">
-            <p className="font-medium text-slate-200">Expected columns</p>
+          <div className="rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3 text-xs text-slate-600">
+            <p className="font-medium text-slate-700">Expected columns</p>
             <p className="mt-1">
-              <span className="font-medium text-slate-200">Article</span> (required),{' '}
-              <span className="font-medium text-slate-200">Vendor</span>,{' '}
-              <span className="font-medium text-slate-200">Quantity</span>,{' '}
-              <span className="font-medium text-slate-200">Rate</span>,{' '}
-              <span className="font-medium text-slate-200">Request date</span>,{' '}
-              <span className="font-medium text-slate-200">Remarks</span>. Headers are matched
+              <span className="font-medium text-slate-800">Article</span> (required),{' '}
+              <span className="font-medium text-slate-800">Vendor</span>,{' '}
+              <span className="font-medium text-slate-800">Quantity</span>,{' '}
+              <span className="font-medium text-slate-800">Rate</span>,{' '}
+              <span className="font-medium text-slate-800">Request date</span>,{' '}
+              <span className="font-medium text-slate-800">Remarks</span>. Headers are matched
               case-insensitively, and common aliases such as “Title”, “Qty”, “Price” and “Notes”
               work too. Unknown vendors are created automatically and linked to the selected client.
             </p>
@@ -1013,10 +1013,10 @@ function EmptyState({
   action?: ReactNode
 }) {
   return (
-    <div className="rounded-xl border border-dashed border-white/15 bg-slate-900 px-6 py-10 text-center">
-      <InboxIcon className="mx-auto h-9 w-9 text-slate-600" />
-      <p className="mt-3 text-sm font-medium text-slate-100">{title}</p>
-      <p className="mx-auto mt-1 max-w-md text-sm text-slate-400">{description}</p>
+    <div className="rounded-xl border border-dashed border-slate-300 bg-white px-6 py-10 text-center">
+      <InboxIcon className="mx-auto h-9 w-9 text-slate-300" />
+      <p className="mt-3 text-sm font-medium text-slate-900">{title}</p>
+      <p className="mx-auto mt-1 max-w-md text-sm text-slate-500">{description}</p>
       {action}
     </div>
   )
@@ -1024,13 +1024,13 @@ function EmptyState({
 
 function PendingSkeleton() {
   return (
-    <div className="overflow-hidden rounded-xl border border-white/10" aria-hidden="true">
+    <div className="overflow-hidden rounded-xl border border-slate-200" aria-hidden="true">
       {Array.from({ length: 5 }).map((_, index) => (
-        <div key={index} className="flex items-center gap-4 border-b border-white/5 px-3 py-3.5 last:border-0">
-          <div className="h-4 w-4 animate-pulse rounded bg-white/5" />
-          <div className="h-4 flex-1 animate-pulse rounded bg-white/5" />
-          <div className="hidden h-4 w-24 animate-pulse rounded bg-white/5 sm:block" />
-          <div className="h-4 w-16 animate-pulse rounded bg-white/5" />
+        <div key={index} className="flex items-center gap-4 border-b border-slate-100 px-3 py-3.5 last:border-0">
+          <div className="h-4 w-4 animate-pulse rounded bg-slate-100" />
+          <div className="h-4 flex-1 animate-pulse rounded bg-slate-100" />
+          <div className="hidden h-4 w-24 animate-pulse rounded bg-slate-100 sm:block" />
+          <div className="h-4 w-16 animate-pulse rounded bg-slate-100" />
         </div>
       ))}
     </div>
@@ -1039,17 +1039,17 @@ function PendingSkeleton() {
 
 function tabClass(active: boolean) {
   return [
-    'inline-flex flex-1 items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400',
+    'inline-flex flex-1 items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500',
     active
-      ? 'bg-slate-900 text-slate-100 shadow-sm'
-      : 'text-slate-400 hover:bg-white/60 hover:text-slate-100',
+      ? 'bg-white text-slate-900 shadow-sm'
+      : 'text-slate-600 hover:bg-white/60 hover:text-slate-900',
   ].join(' ')
 }
 
 function tabBadgeClass(active: boolean) {
   return [
     'inline-flex min-w-5 items-center justify-center rounded-full px-1.5 py-0.5 text-[11px] font-semibold tabular-nums',
-    active ? 'bg-emerald-500/15 text-emerald-300' : 'bg-white/10 text-slate-400',
+    active ? 'bg-brand-100 text-brand-700' : 'bg-slate-200 text-slate-600',
   ].join(' ')
 }
 

@@ -64,7 +64,9 @@ export type ArticleRequestRow = {
   notes: string | null
   created_at: string | null
   article_title?: string | null
+  article_description?: string | null
   rate?: number | null
+  cost_price?: number | null
 }
 
 export function getArticleTitle(row: ArticleRequestRow): string {
@@ -72,6 +74,12 @@ export function getArticleTitle(row: ArticleRequestRow): string {
 
   if (row.article_title?.trim()) {
     return row.article_title.trim()
+  }
+
+  // The base schema stores the description in `article_description`; the
+  // proforma migration adds the shorter `article_title` column.
+  if (row.article_description?.trim()) {
+    return row.article_description.trim()
   }
 
   if (meta?.title.trim()) {
@@ -88,6 +96,10 @@ export function getArticleTitle(row: ArticleRequestRow): string {
 export function getArticleRate(row: ArticleRequestRow): number {
   if (typeof row.rate === 'number' && Number.isFinite(row.rate)) {
     return row.rate
+  }
+
+  if (typeof row.cost_price === 'number' && Number.isFinite(row.cost_price)) {
+    return row.cost_price
   }
 
   return parseArticleRequestMeta(row.notes)?.rate ?? 0

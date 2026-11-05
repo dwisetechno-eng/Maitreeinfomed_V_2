@@ -49,17 +49,17 @@ export function ArticleTimeline({ articles, departments, clients }: ArticleTimel
   )
 
   return (
-    <section className="rounded-2xl border border-white/10 bg-slate-900 p-5 shadow-sm">
+    <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h2 className="text-sm font-semibold text-slate-100">Article request timeline</h2>
-          <p className="mt-0.5 text-xs text-slate-400">
+          <h2 className="text-sm font-semibold text-slate-900">Article request timeline</h2>
+          <p className="mt-0.5 text-xs text-slate-500">
             Requests per month, stacked by {dimension}. Last {MONTHS_TO_SHOW} months in the data.
           </p>
         </div>
 
         <div
-          className="inline-flex shrink-0 rounded-lg bg-white/5 p-1"
+          className="inline-flex shrink-0 rounded-lg bg-slate-100 p-1"
           role="group"
           aria-label="Group timeline by"
         >
@@ -83,19 +83,19 @@ export function ArticleTimeline({ articles, departments, clients }: ArticleTimel
       </div>
 
       {!timeline.hasData ? (
-        <div className="mt-6 rounded-xl border border-dashed border-white/15 bg-white/[0.03] px-6 py-12 text-center">
-          <ChartBarIcon className="mx-auto h-9 w-9 text-slate-600" />
-          <p className="mt-3 text-sm font-medium text-slate-100">No article requests to chart</p>
-          <p className="mx-auto mt-1 max-w-sm text-sm text-slate-400">
+        <div className="mt-6 rounded-xl border border-dashed border-slate-300 bg-slate-50/60 px-6 py-12 text-center">
+          <ChartBarIcon className="mx-auto h-9 w-9 text-slate-300" />
+          <p className="mt-3 text-sm font-medium text-slate-900">No article requests to chart</p>
+          <p className="mx-auto mt-1 max-w-sm text-sm text-slate-500">
             Requests appear here once they are captured with a request date.
           </p>
         </div>
       ) : (
         <>
-          <div className="mt-5 flex items-center justify-between text-xs text-slate-400">
+          <div className="mt-5 flex items-center justify-between text-xs text-slate-500">
             <span>{timeline.rangeLabel}</span>
             <span>
-              Peak month: <span className="font-medium text-slate-200">{timeline.peakTotal}</span>{' '}
+              Peak month: <span className="font-medium text-slate-700">{timeline.peakTotal}</span>{' '}
               request{timeline.peakTotal === 1 ? '' : 's'}
             </span>
           </div>
@@ -105,7 +105,7 @@ export function ArticleTimeline({ articles, departments, clients }: ArticleTimel
               {[0, 25, 50, 75, 100].map((percent) => (
                 <div
                   key={percent}
-                  className="absolute inset-x-0 border-t border-dashed border-white/10"
+                  className="absolute inset-x-0 border-t border-dashed border-slate-200"
                   style={{ bottom: `${percent}%` }}
                   aria-hidden="true"
                 />
@@ -119,7 +119,7 @@ export function ArticleTimeline({ articles, departments, clients }: ArticleTimel
                   return (
                     <div key={month.key} className="flex h-full flex-1 flex-col justify-end">
                       <div className="relative flex h-full items-end">
-                        <span className="absolute -top-5 left-1/2 -translate-x-1/2 text-[11px] font-medium tabular-nums text-slate-400">
+                        <span className="absolute -top-5 left-1/2 -translate-x-1/2 text-[11px] font-medium tabular-nums text-slate-600">
                           {month.total > 0 ? month.total : ''}
                         </span>
 
@@ -159,16 +159,16 @@ export function ArticleTimeline({ articles, departments, clients }: ArticleTimel
             <div className="mt-2 flex gap-2 sm:gap-4">
               {timeline.months.map((month) => (
                 <div key={month.key} className="flex-1 text-center">
-                  <p className="text-xs font-medium text-slate-200">{month.label}</p>
-                  <p className="text-[10px] text-slate-500">{month.year}</p>
+                  <p className="text-xs font-medium text-slate-700">{month.label}</p>
+                  <p className="text-[10px] text-slate-400">{month.year}</p>
                 </div>
               ))}
             </div>
           </div>
 
-          <div className="mt-4 flex flex-wrap gap-x-4 gap-y-1.5 border-t border-white/5 pt-3">
+          <div className="mt-4 flex flex-wrap gap-x-4 gap-y-1.5 border-t border-slate-100 pt-3">
             {timeline.groups.map((group) => (
-              <div key={group.key} className="flex items-center gap-1.5 text-xs text-slate-400">
+              <div key={group.key} className="flex items-center gap-1.5 text-xs text-slate-600">
                 <span
                   className="h-2.5 w-2.5 shrink-0 rounded-sm"
                   style={{ backgroundColor: group.color }}
@@ -177,7 +177,7 @@ export function ArticleTimeline({ articles, departments, clients }: ArticleTimel
                 <span className="max-w-40 truncate" title={group.name}>
                   {group.name}
                 </span>
-                <span className="tabular-nums text-slate-500">{group.total}</span>
+                <span className="tabular-nums text-slate-400">{group.total}</span>
               </div>
             ))}
           </div>
@@ -325,7 +325,7 @@ function displayName(key: string, nameMap: Map<string, string>) {
 
 function toggleClass(active: boolean) {
   return [
-    'rounded-md px-2.5 py-1 text-xs font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400',
-    active ? 'bg-slate-900 text-slate-100 shadow-sm' : 'text-slate-400 hover:text-slate-100',
+    'rounded-md px-2.5 py-1 text-xs font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500',
+    active ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600 hover:text-slate-900',
   ].join(' ')
 }
