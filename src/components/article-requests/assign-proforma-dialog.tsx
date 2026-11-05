@@ -282,7 +282,10 @@ export function AssignProformaDialog({
 
       const { data: linked, error: linkError } = await supabase
         .from('article_requests')
-        .update({ proforma_invoice_id: invoiceId })
+        .update({
+          proforma_invoice_id: invoiceId,
+          status_code: 'PI_GENERATED',
+        })
         .in('id', requestIds)
         .select('id')
 

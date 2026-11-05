@@ -31,6 +31,7 @@ export type ReceiptForAllocation = {
 
 export type TaxInvoiceRow = {
   id: string
+  tax_invoice_number?: string | null
   client_id: string | null
   invoice_date: string | null
   subtotal: number | null
@@ -555,7 +556,7 @@ export function AllocatePaymentDialog({ open, onClose, receipt, onAllocated }: P
 }
 
 export function invoiceLabel(invoice: TaxInvoiceRow): string {
-  return `INV-${invoice.id.slice(0, 8).toUpperCase()}`
+  return invoice.tax_invoice_number?.trim() || `INV-${invoice.id.slice(0, 8).toUpperCase()}`
 }
 
 function toNumber(value: unknown): number {

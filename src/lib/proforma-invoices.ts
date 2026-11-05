@@ -34,6 +34,8 @@ export type CreateProformaInvoiceInput = {
   taxRate?: number
   taxAmount?: number
   statusCode?: string | null
+  /** Explicit, user-editable invoice number. Generated when omitted. */
+  piNumber?: string | null
   invoiceDate?: string
   piDate?: string
   notes?: string | null
@@ -133,10 +135,11 @@ export async function createProformaInvoice(
       ? input.taxAmount
       : (input.subtotal * taxRate) / 100
 
+  const manualNumber = input.piNumber?.trim() || null
   let lastError: unknown = null
 
-  for (let attempt = 0; attempt < 6; attempt += 1) {
-    const piNumber = await fetchNextPiNumber(supabase, piDate)
+  for (let attempt = 0; attempt < (manualNumber ? 1 : 6); attempt += 1) {
+    const piNumber = manualNumber ?? (await fetchNextPiNumber(supabase, piDate))
 
     const payload: Record<string, unknown> = {
       pi_number: piNumber,

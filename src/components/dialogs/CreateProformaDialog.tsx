@@ -12,7 +12,13 @@ import {
   getArticleTitle,
   parseArticleRequestMeta,
 } from '@/lib/article-request-meta'
-import { createProformaInvoice, DEFAULT_TAX_RATE } from '@/lib/proforma-invoices'
+import {
+  createProformaInvoice,
+  DEFAULT_TAX_RATE,
+  fetchNextPiNumber,
+  getPiNumberPrefix,
+  todayIsoDate,
+} from '@/lib/proforma-invoices'
 import { Alert } from '@/components/ui/alert'
 import {
   FileSpreadsheetIcon,
@@ -81,6 +87,10 @@ export function CreateProformaDialog({ open, onClose, onCreated }: CreateProform
   const [selectedBatchKey, setSelectedBatchKey] = useState('')
 
   const [taxRate, setTaxRate] = useState(String(DEFAULT_TAX_RATE))
+  const [piNumber, setPiNumber] = useState('')
+  const [piDate, setPiDate] = useState(todayIsoDate())
+  const [piNumberTouched, setPiNumberTouched] = useState(false)
+  const [suggestingNumber, setSuggestingNumber] = useState(false)
   const [generating, setGenerating] = useState(false)
   const [generateError, setGenerateError] = useState<string | null>(null)
 
@@ -108,8 +118,42 @@ export function CreateProformaDialog({ open, onClose, onCreated }: CreateProform
     setSelectedBatchKey('')
     setGenerateError(null)
     setTaxRate(String(DEFAULT_TAX_RATE))
+    setPiDate(todayIsoDate())
+    setPiNumber('')
+    setPiNumberTouched(false)
     setPendingRows([])
   }, [open])
+
+  // Keep the invoice number in sync with the chosen date until the user edits it.
+  useEffect(() => {
+    if (!open || piNumberTouched || !hasSupabaseEnv()) {
+      return
+    }
+
+    let cancelled = false
+    setSuggestingNumber(true)
+
+    fetchNextPiNumber(createClient(), piDate || todayIsoDate())
+      .then((suggestion) => {
+        if (!cancelled) {
+          setPiNumber(suggestion)
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setPiNumber(`${getPiNumberPrefix(piDate || todayIsoDate())}0001`)
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setSuggestingNumber(false)
+        }
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [open, piDate, piNumberTouched])
 
   // Reference data: clients, departments, vendors and the default status.
   useEffect(() => {
@@ -410,6 +454,16 @@ export function CreateProformaDialog({ open, onClose, onCreated }: CreateProform
       return
     }
 
+    if (!piNumber.trim()) {
+      setGenerateError('Enter a proforma invoice number.')
+      return
+    }
+
+    if (!piDate) {
+      setGenerateError('Choose the proforma invoice date.')
+      return
+    }
+
     if (effectiveRows.length === 0) {
       setGenerateError(
         mode === 'batch'
@@ -440,6 +494,9 @@ export function CreateProformaDialog({ open, onClose, onCreated }: CreateProform
         taxAmount,
         grandTotal,
         statusCode: proformaStatusCode,
+        piNumber: piNumber.trim(),
+        piDate,
+        invoiceDate: piDate,
       })
 
       if (!created.ok) {
@@ -454,7 +511,10 @@ export function CreateProformaDialog({ open, onClose, onCreated }: CreateProform
       const requestIds = effectiveRows.map((row) => row.id)
       const { data: linked, error: linkError } = await supabase
         .from('article_requests')
-        .update({ proforma_invoice_id: invoiceId })
+        .update({
+          proforma_invoice_id: invoiceId,
+          status_code: 'PI_GENERATED',
+        })
         .in('id', requestIds)
         .select('id')
 
@@ -569,6 +629,61 @@ export function CreateProformaDialog({ open, onClose, onCreated }: CreateProform
                   </option>
                 ))}
               </select>
+            </div>
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div>
+              <div className="mb-1.5 flex items-center justify-between gap-2">
+                <label htmlFor="proforma-number" className={`${labelClass} mb-0`}>
+                  Proforma invoice number <span className="text-red-500">*</span>
+                </label>
+                <button
+                  type="button"
+                  onClick={() => setPiNumberTouched(false)}
+                  disabled={generating || suggestingNumber}
+                  className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium text-brand-700 transition-colors hover:bg-brand-50 disabled:opacity-50"
+                >
+                  {suggestingNumber ? (
+                    <SpinnerIcon className="h-3 w-3" />
+                  ) : (
+                    <RefreshIcon className="h-3 w-3" />
+                  )}
+                  Suggest
+                </button>
+              </div>
+              <input
+                id="proforma-number"
+                value={piNumber}
+                onChange={(event) => {
+                  setPiNumber(event.target.value)
+                  setPiNumberTouched(true)
+                  setGenerateError(null)
+                }}
+                disabled={generating}
+                maxLength={60}
+                required
+                placeholder={`${getPiNumberPrefix(piDate)}0001`}
+                className={`${inputClass} font-mono`}
+              />
+            </div>
+
+            <div>
+              <label htmlFor="proforma-date" className={labelClass}>
+                Proforma invoice date <span className="text-red-500">*</span>
+              </label>
+              <input
+                id="proforma-date"
+                type="date"
+                value={piDate}
+                onChange={(event) => {
+                  setPiDate(event.target.value)
+                  setGenerateError(null)
+                }}
+                disabled={generating}
+                required
+                className={inputClass}
+              />
             </div>
           </div>
 

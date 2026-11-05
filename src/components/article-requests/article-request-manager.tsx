@@ -4,6 +4,7 @@ import type { FormEvent } from 'react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   FileText,
+  Layers,
   Pencil,
   Plus,
   RefreshCw,
@@ -16,6 +17,7 @@ import {
 import type { ImportResult } from '@/actions/import-articles'
 import { AssignProformaDialog } from '@/components/article-requests/assign-proforma-dialog'
 import { BatchImportDialog } from '@/components/article-requests/batch-import-dialog'
+import { BatchManageDialog } from '@/components/article-requests/batch-manage-dialog'
 import {
   SUPABASE_SETUP_MESSAGE,
   badgeClass,
@@ -149,6 +151,7 @@ export function ArticleRequestManager() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [assignOpen, setAssignOpen] = useState(false)
   const [importOpen, setImportOpen] = useState(false)
+  const [batchManageOpen, setBatchManageOpen] = useState(false)
   const [statusSavingId, setStatusSavingId] = useState<string | null>(null)
 
   const clientNames = useMemo(() => {
@@ -665,6 +668,14 @@ export function ArticleRequestManager() {
         </div>
 
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+          <button
+            type="button"
+            onClick={() => setBatchManageOpen(true)}
+            className={secondaryButtonClass}
+          >
+            <Layers className="h-4 w-4" />
+            Manage batches
+          </button>
           <button
             type="button"
             onClick={() => setImportOpen(true)}
@@ -1291,6 +1302,17 @@ export function ArticleRequestManager() {
         departments={departments}
         contacts={contacts}
         onImported={handleBatchImported}
+      />
+
+      <BatchManageDialog
+        open={batchManageOpen}
+        onClose={() => setBatchManageOpen(false)}
+        articles={articles}
+        clientNames={clientNames}
+        onUpdated={async (message) => {
+          setNotice({ tone: 'success', message })
+          await loadData({ silent: true })
+        }}
       />
 
       <ConfirmDialog

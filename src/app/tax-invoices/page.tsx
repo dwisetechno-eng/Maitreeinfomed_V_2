@@ -1,10 +1,11 @@
-import { PagePlaceholder } from '@/components/layout/page-placeholder'
+import type { Metadata } from 'next'
+
+import { TaxInvoiceManager } from '@/components/tax-invoices/tax-invoice-manager'
+
+export const metadata: Metadata = {
+  title: 'Tax Invoices',
+}
 
 export default function TaxInvoicesPage() {
-  return (
-    <PagePlaceholder
-      title="Tax Invoices"
-      description="Manage tax invoices and their payment status."
-    />
-  )
+  return <TaxInvoiceManager />
 }

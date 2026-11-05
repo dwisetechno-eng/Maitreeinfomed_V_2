@@ -29,6 +29,29 @@ export function encodeArticleRequestNotes(meta: ArticleRequestMeta): string {
   })}`
 }
 
+/**
+ * Rewrite the batch fields inside a structured `notes` payload while preserving
+ * the rest of the metadata. Plain-text notes are returned untouched because they
+ * cannot safely carry structured batch data.
+ */
+export function withArticleBatchMeta(
+  notes: string | null | undefined,
+  batchId: string | null,
+  batchTag: string | null
+): string | null {
+  const meta = parseArticleRequestMeta(notes)
+
+  if (!meta) {
+    return notes ?? null
+  }
+
+  return encodeArticleRequestNotes({
+    ...meta,
+    batchId: batchId ?? undefined,
+    batchTag: batchTag ?? undefined,
+  })
+}
+
 export function parseArticleRequestMeta(
   notes: string | null | undefined
 ): ArticleRequestMeta | null {

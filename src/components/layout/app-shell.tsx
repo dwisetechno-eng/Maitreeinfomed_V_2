@@ -117,9 +117,15 @@ export function AppShell({ user, children }: { user?: AppUser | null; children: 
     } finally {
       setSigningOut(false)
       setMobileOpen(false)
-      router.push('/')
+      router.replace('/login')
       router.refresh()
     }
+  }
+
+  // The login screen renders its own full-page layout without the workspace
+  // chrome. All hooks above still run on every route.
+  if (pathname === '/login') {
+    return <>{children}</>
   }
 
   const sidebar = (
