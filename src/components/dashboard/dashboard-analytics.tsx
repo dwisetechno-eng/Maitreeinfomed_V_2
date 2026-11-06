@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 
 import { ArticleTimeline } from '@/components/dashboard/article-timeline'
+import { InvoicePipeline } from '@/components/dashboard/invoice-pipeline'
 import { KpiCards, KpiCardsSkeleton } from '@/components/dashboard/kpi-cards'
 import { ModuleLinks } from '@/components/dashboard/module-links'
 import { StatusBreakdown } from '@/components/dashboard/status-breakdown'
@@ -53,8 +54,8 @@ export function DashboardAnalytics() {
 
       const [proformaResult, taxResult, articlesResult, statusesResult, departmentsResult, clientsResult] =
         await Promise.all([
-          supabase.from('proforma_invoices').select('id, subtotal, grand_total'),
-          supabase.from('tax_invoices').select('id, subtotal, grand_total'),
+          supabase.from('proforma_invoices').select('*'),
+          supabase.from('tax_invoices').select('*'),
           supabase
             .from('article_requests')
             .select(
@@ -199,6 +200,10 @@ export function DashboardAnalytics() {
       {!snapshot && loading ? (
         <>
           <KpiCardsSkeleton />
+          <div className="grid gap-4 xl:grid-cols-2">
+            <PanelSkeleton />
+            <PanelSkeleton />
+          </div>
           <div className="grid gap-4 xl:grid-cols-5">
             <PanelSkeleton className="xl:col-span-3" />
             <PanelSkeleton className="xl:col-span-2" />
@@ -234,6 +239,8 @@ export function DashboardAnalytics() {
               taxInvoicedCount={kpis.taxInvoiced}
             />
           )}
+
+          <InvoicePipeline proforma={snapshot.proforma} tax={snapshot.tax} />
 
           <div className="grid gap-4 xl:grid-cols-5">
             <div className="xl:col-span-3">

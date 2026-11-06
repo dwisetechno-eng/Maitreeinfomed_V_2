@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   Download,
   Eye,
+  ListChecks,
   Pencil,
   Plus,
   RefreshCw,
@@ -994,6 +995,20 @@ export function ProformaInvoicesManager() {
                       <div className="flex items-center justify-end gap-1">
                         <button
                           type="button"
+                          onClick={() => {
+                            setViewActionError(null)
+                            setViewNotice(null)
+                            setViewTarget(invoice)
+                          }}
+                          className={rowActionClass}
+                          aria-label={`Manage articles on ${invoice.pi_number ?? 'invoice'}`}
+                          title="View and edit the linked article requests"
+                        >
+                          <ListChecks className="h-3.5 w-3.5" />
+                          Articles
+                        </button>
+                        <button
+                          type="button"
                           onClick={() => setViewTarget(invoice)}
                           className={rowActionClass}
                           aria-label={`View ${invoice.pi_number ?? 'invoice'}`}
@@ -1343,7 +1358,7 @@ export function ProformaInvoicesManager() {
         }}
         size="2xl"
         title={`Edit proforma invoice ${editTarget?.pi_number ?? ''}`}
-        description="Update the invoice number, date, status and pricing. Linked article requests are not changed."
+        description="Update the invoice number, date, status and pricing. Use Manage article requests to add or remove the requests linked to this invoice."
       >
         <form onSubmit={handleEditSubmit} className="space-y-4">
           {editError && <Alert tone="error">{editError}</Alert>}
@@ -1443,7 +1458,26 @@ export function ProformaInvoicesManager() {
             </dd>
           </dl>
 
-          <div className="flex justify-end gap-2 border-t border-slate-200 pt-4">
+          <div className="flex flex-wrap justify-end gap-2 border-t border-slate-200 pt-4">
+            <button
+              type="button"
+              onClick={() => {
+                if (!editTarget || saving) {
+                  return
+                }
+                const target = editTarget
+                setEditTarget(null)
+                setEditError(null)
+                setViewActionError(null)
+                setViewNotice(null)
+                setViewTarget(target)
+              }}
+              disabled={saving}
+              className={`${secondaryButtonClass} mr-auto`}
+            >
+              <ListChecks className="h-4 w-4" />
+              Manage article requests
+            </button>
             <button
               type="button"
               onClick={() => setEditTarget(null)}

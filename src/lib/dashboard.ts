@@ -13,6 +13,12 @@ export type InvoiceRow = {
   id: string
   subtotal: number | null
   grand_total: number | null
+  status_code?: string | null
+  tax_invoice_id?: string | null
+  amount_paid?: number | null
+  tax_total?: number | null
+  due_date?: string | null
+  created_at?: string | null
 }
 
 export type StatusMasterRow = {
