@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Eye, Pencil, Plus, RefreshCw, Search, Trash2 } from 'lucide-react'
+import { Eye, ListChecks, Pencil, Plus, RefreshCw, Search, Trash2 } from 'lucide-react'
 
 import {
   SUPABASE_SETUP_MESSAGE,
@@ -13,13 +13,13 @@ import {
   hasSupabaseEnv,
   inputClass,
   primaryButtonClass,
-  rowActionClass,
   rowDangerActionClass,
   secondaryButtonClass,
 } from '@/components/masters/utils'
 import { TaxInvoiceDialog } from '@/components/tax-invoices/tax-invoice-dialog'
 import { Alert } from '@/components/ui/alert'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
+import { IconButton } from '@/components/ui/icon-button'
 import { InboxIcon, PlusIcon, SpinnerIcon } from '@/components/ui/icons'
 import { Modal } from '@/components/ui/modal'
 import { isMissingColumnError, isMissingTableError } from '@/lib/supabase-errors'
@@ -64,8 +64,16 @@ export function TaxInvoiceManager() {
   const [clientFilter, setClientFilter] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
 
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const status = params.get('status')
+    const client = params.get('client')
+    if (status) setStatusFilter(status)
+    if (client) setClientFilter(client)
+  }, [])
+
   const [dialogOpen, setDialogOpen] = useState(false)
-  const [dialogInvoice, setDialogInvoice] = useState<TaxInvoiceRow | null>(null)
+  const [dialogInvoice, setDialogInvoice] = useState<InvoiceWithLinks | null>(null)
 
   const [viewTarget, setViewTarget] = useState<InvoiceWithLinks | null>(null)
   const [viewProformas, setViewProformas] = useState<LinkedProforma[]>([])
@@ -653,10 +661,12 @@ export function TaxInvoiceManager() {
           </p>
         </div>
 
-        <button type="button" onClick={openCreateDialog} className={primaryButtonClass}>
-          <PlusIcon className="h-4 w-4" />
-          New tax invoice
-        </button>
+        <IconButton
+          label="New tax invoice"
+          icon={<Plus />}
+          variant="primary"
+          onClick={openCreateDialog}
+        />
       </div>
 
       {notice && (
@@ -874,35 +884,47 @@ export function TaxInvoiceManager() {
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center justify-end gap-1">
-                          <button
-                            type="button"
+                          <IconButton
+                            label={`Manage proforma invoices on ${
+                              invoice.tax_invoice_number ?? 'tax invoice'
+                            }`}
+                            tooltipText="Proformas: add or remove linked proforma invoices"
+                            tooltip="native"
+                            variant="ghost"
+                            size="sm"
+                            icon={<ListChecks />}
                             onClick={() => setViewTarget(invoice)}
-                            className={rowActionClass}
-                            aria-label={`View ${invoice.tax_invoice_number ?? 'tax invoice'}`}
-                          >
-                            <Eye className="h-3.5 w-3.5" />
-                            View
-                          </button>
-                          <button
-                            type="button"
+                          />
+                          <IconButton
+                            label={`View ${invoice.tax_invoice_number ?? 'tax invoice'}`}
+                            tooltipText="View invoice"
+                            tooltip="native"
+                            variant="ghost"
+                            size="sm"
+                            icon={<Eye />}
+                            onClick={() => setViewTarget(invoice)}
+                          />
+                          <IconButton
+                            label={`Edit ${invoice.tax_invoice_number ?? 'tax invoice'}`}
+                            tooltipText="Edit invoice details"
+                            tooltip="native"
+                            variant="ghost"
+                            size="sm"
+                            icon={<Pencil />}
                             onClick={() => openEditDialog(invoice)}
-                            className={rowActionClass}
-                            aria-label={`Edit ${invoice.tax_invoice_number ?? 'tax invoice'}`}
-                          >
-                            <Pencil className="h-3.5 w-3.5" />
-                            Edit
-                          </button>
-                          <button
-                            type="button"
+                          />
+                          <IconButton
+                            label={`Delete ${invoice.tax_invoice_number ?? 'tax invoice'}`}
+                            tooltipText="Delete invoice"
+                            tooltip="native"
+                            variant="danger"
+                            size="sm"
+                            icon={<Trash2 />}
                             onClick={() => {
                               setDeleteError(null)
                               setDeleteTarget(invoice)
                             }}
-                            className={rowDangerActionClass}
-                            aria-label={`Delete ${invoice.tax_invoice_number ?? 'tax invoice'}`}
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </button>
+                          />
                         </div>
                       </td>
                     </tr>
@@ -922,6 +944,15 @@ export function TaxInvoiceManager() {
         statuses={statuses}
         existingNumbers={invoices.map((invoice) => invoice.tax_invoice_number)}
         onSaved={handleSaved}
+        onManageProformas={
+          dialogInvoice
+            ? () => {
+                const target = dialogInvoice
+                setDialogOpen(false)
+                setViewTarget(target)
+              }
+            : undefined
+        }
       />
 
       <Modal

@@ -1,6 +1,8 @@
 'use client'
 
 import { useMemo } from 'react'
+import Link from 'next/link'
+import { ArrowUpRight } from 'lucide-react'
 
 import { InboxIcon } from '@/components/ui/icons'
 import { formatCurrency, invoiceValue, toNumber, type InvoiceRow } from '@/lib/dashboard'
@@ -121,6 +123,7 @@ export function InvoicePipeline({ proforma, tax }: InvoicePipelineProps) {
 
       <div className="grid gap-4 xl:grid-cols-2">
         <PipelineCard
+          href="/proforma-invoices"
           title="Proforma invoices"
           subtitle="Open vs converted to tax invoice"
           stats={proformaStats.stages}
@@ -140,6 +143,7 @@ export function InvoicePipeline({ proforma, tax }: InvoicePipelineProps) {
         />
 
         <PipelineCard
+          href="/tax-invoices"
           title="Tax invoices"
           subtitle="Billed, collected and outstanding"
           stats={taxStats.stages}
@@ -171,6 +175,7 @@ export function InvoicePipeline({ proforma, tax }: InvoicePipelineProps) {
 }
 
 function PipelineCard({
+  href,
   title,
   subtitle,
   stats,
@@ -179,6 +184,7 @@ function PipelineCard({
   secondary,
   progress,
 }: {
+  href: string
   title: string
   subtitle: string
   stats: PipelineStage[]
@@ -197,6 +203,13 @@ function PipelineCard({
           <h3 className="text-sm font-semibold text-slate-900">{title}</h3>
           <p className="mt-0.5 text-xs text-slate-500">{subtitle}</p>
         </div>
+        <Link
+          href={href}
+          className="inline-flex shrink-0 items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium text-brand-700 transition hover:bg-brand-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
+        >
+          Open
+          <ArrowUpRight className="h-3.5 w-3.5" />
+        </Link>
       </div>
 
       <div className="mt-4 grid grid-cols-2 gap-3">
@@ -245,32 +258,43 @@ function PipelineCard({
         </div>
       ) : (
         <ul className="mt-4 space-y-3">
-          {active.map((stage) => (
-            <li key={stage.code}>
-              <div className="flex items-center justify-between gap-2">
-                <span
-                  className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ring-1 ring-inset ${stage.tone}`}
+          {active.map((stage) => {
+            const isUnassigned = stage.code === UNASSIGNED_STAGE.code
+            const stageHref = isUnassigned ? href : `${href}?status=${encodeURIComponent(stage.code)}`
+
+            return (
+              <li key={stage.code}>
+                <Link
+                  href={stageHref}
+                  className="-mx-2 block rounded-lg px-2 py-1 transition hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
+                  title={`Open ${title.toLowerCase()} · ${stage.label}`}
                 >
-                  {stage.label}
-                </span>
-                <span className="text-xs tabular-nums text-slate-500">
-                  <span className="mr-1.5 text-sm font-semibold text-slate-900">
-                    {stage.count}
-                  </span>
-                  {formatCurrency(stage.value)}
-                </span>
-              </div>
-              <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-slate-100">
-                <div
-                  className="h-full rounded-full"
-                  style={{
-                    width: `${maxValue > 0 ? (stage.value / maxValue) * 100 : 0}%`,
-                    backgroundColor: stage.bar,
-                  }}
-                />
-              </div>
-            </li>
-          ))}
+                  <div className="flex items-center justify-between gap-2">
+                    <span
+                      className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ring-1 ring-inset ${stage.tone}`}
+                    >
+                      {stage.label}
+                    </span>
+                    <span className="text-xs tabular-nums text-slate-500">
+                      <span className="mr-1.5 text-sm font-semibold text-slate-900">
+                        {stage.count}
+                      </span>
+                      {formatCurrency(stage.value)}
+                    </span>
+                  </div>
+                  <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-slate-100">
+                    <div
+                      className="h-full rounded-full"
+                      style={{
+                        width: `${maxValue > 0 ? (stage.value / maxValue) * 100 : 0}%`,
+                        backgroundColor: stage.bar,
+                      }}
+                    />
+                  </div>
+                </Link>
+              </li>
+            )
+          })}
         </ul>
       )}
     </article>

@@ -1,6 +1,8 @@
 'use client'
 
 import { useMemo } from 'react'
+import Link from 'next/link'
+import { ArrowUpRight } from 'lucide-react'
 
 import { InboxIcon } from '@/components/ui/icons'
 import type { DashboardArticle, StatusMasterRow } from '@/lib/dashboard'
@@ -32,9 +34,16 @@ export function StatusBreakdown({ articles, statuses }: StatusBreakdownProps) {
           <h2 className="text-sm font-semibold text-slate-900">Status breakdown</h2>
           <p className="mt-0.5 text-xs text-slate-500">
             Where the {breakdown.total} article request{breakdown.total === 1 ? '' : 's'} sit right
-            now.
+            now. Click a status to open it.
           </p>
         </div>
+        <Link
+          href="/article-requests"
+          className="inline-flex shrink-0 items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium text-brand-700 transition hover:bg-brand-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
+        >
+          Open
+          <ArrowUpRight className="h-3.5 w-3.5" />
+        </Link>
       </div>
 
       {breakdown.total === 0 ? (
@@ -61,7 +70,16 @@ export function StatusBreakdown({ articles, statuses }: StatusBreakdownProps) {
 
           <div className="mt-4 space-y-3.5">
             {breakdown.rows.map((row) => (
-              <div key={row.key}>
+              <Link
+                key={row.key}
+                href={
+                  row.code
+                    ? `/article-requests?status=${encodeURIComponent(row.code)}`
+                    : '/article-requests'
+                }
+                className="-mx-2 block rounded-lg px-2 py-1 transition hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
+                title={`Open article requests · ${row.label}`}
+              >
                 <div className="flex items-center justify-between gap-2">
                   <div className="flex min-w-0 items-center gap-1.5">
                     <p className="truncate text-sm font-medium text-slate-800" title={row.label}>
@@ -109,7 +127,7 @@ export function StatusBreakdown({ articles, statuses }: StatusBreakdownProps) {
                 {row.description && (
                   <p className="mt-1 line-clamp-2 text-xs text-slate-500">{row.description}</p>
                 )}
-              </div>
+              </Link>
             ))}
           </div>
         </>

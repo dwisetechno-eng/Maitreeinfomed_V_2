@@ -2,7 +2,7 @@
 
 import type { FormEvent } from 'react'
 import { useEffect, useMemo, useState } from 'react'
-import { CheckCircle2, FileSpreadsheet, RefreshCw } from 'lucide-react'
+import { CheckCircle2, FileSpreadsheet, ListChecks, RefreshCw } from 'lucide-react'
 
 import {
   SUPABASE_SETUP_MESSAGE,
@@ -55,6 +55,8 @@ type Props = {
   statuses: TaxStatusOption[]
   existingNumbers: Array<string | null | undefined>
   onSaved: (message: string) => void | Promise<void>
+  /** Shown while editing: hands off to the proforma add/remove view. */
+  onManageProformas?: () => void
 }
 
 const EMPTY_FORM: FormState = {
@@ -74,6 +76,7 @@ export function TaxInvoiceDialog({
   statuses,
   existingNumbers,
   onSaved,
+  onManageProformas,
 }: Props) {
   const [source, setSource] = useState<Source>('manual')
   const [form, setForm] = useState<FormState>(EMPTY_FORM)
@@ -486,7 +489,7 @@ export function TaxInvoiceDialog({
       title={isEditing ? `Edit tax invoice ${invoice?.tax_invoice_number ?? ''}` : 'New tax invoice'}
       description={
         isEditing
-          ? 'Update the invoice number, date, client and amount. Payment allocation totals are preserved.'
+          ? 'Update the invoice number, date, client and amount. Use Manage proforma invoices to add or remove the proformas this invoice was raised from.'
           : 'Create a tax invoice manually or convert one or more open proforma invoices.'
       }
       footer={
@@ -514,6 +517,17 @@ export function TaxInvoiceDialog({
             </dl>
 
             <div className="flex flex-col-reverse gap-2 sm:flex-row">
+              {isEditing && onManageProformas && (
+                <button
+                  type="button"
+                  onClick={onManageProformas}
+                  disabled={saving}
+                  className={secondaryButtonClass}
+                >
+                  <ListChecks className="h-4 w-4" />
+                  Manage proforma invoices
+                </button>
+              )}
               <button
                 type="button"
                 onClick={onClose}

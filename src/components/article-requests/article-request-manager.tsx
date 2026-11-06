@@ -29,13 +29,12 @@ import {
   inputClass,
   labelClass,
   primaryButtonClass,
-  rowActionClass,
-  rowDangerActionClass,
   roundMoney,
   secondaryButtonClass,
 } from '@/components/masters/utils'
 import { Alert } from '@/components/ui/alert'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
+import { IconButton } from '@/components/ui/icon-button'
 import { Modal } from '@/components/ui/modal'
 import { SpinnerIcon } from '@/components/ui/icons'
 import {
@@ -154,6 +153,27 @@ export function ArticleRequestManager() {
   const [vendorFilter, setVendorFilter] = useState('')
   const [urgencyFilter, setUrgencyFilter] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
+  const [billingFilter, setBillingFilter] = useState<'' | 'pending' | 'billed'>('')
+  const [dateFrom, setDateFrom] = useState('')
+  const [dateTo, setDateTo] = useState('')
+
+  // Deep links from the dashboard pre-apply filters via the query string.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const status = params.get('status')
+    const client = params.get('client')
+    const department = params.get('department')
+    const billing = params.get('billing')
+    const from = params.get('from')
+    const to = params.get('to')
+
+    if (status) setStatusFilter(status)
+    if (client) setClientFilter(client)
+    if (department) setDepartmentFilter(department)
+    if (billing === 'pending' || billing === 'billed') setBillingFilter(billing)
+    if (from && /^\d{4}-\d{2}-\d{2}$/.test(from)) setDateFrom(from)
+    if (to && /^\d{4}-\d{2}-\d{2}$/.test(to)) setDateTo(to)
+  }, [])
 
   const [dialog, setDialog] = useState<DialogState | null>(null)
   const [form, setForm] = useState<FormState>(EMPTY_FORM)
@@ -395,6 +415,26 @@ export function ArticleRequestManager() {
         return false
       }
 
+      if (billingFilter) {
+        const billed = Boolean(article.proforma_invoice_id || article.tax_invoice_id)
+        if (billingFilter === 'billed' ? !billed : billed) {
+          return false
+        }
+      }
+
+      if (dateFrom || dateTo) {
+        const day = (article.request_date ?? article.created_at ?? '').slice(0, 10)
+        if (!day) {
+          return false
+        }
+        if (dateFrom && day < dateFrom) {
+          return false
+        }
+        if (dateTo && day > dateTo) {
+          return false
+        }
+      }
+
       if (!term) {
         return true
       }
@@ -415,9 +455,12 @@ export function ArticleRequestManager() {
   }, [
     articles,
     articleStatuses,
+    billingFilter,
     clientFilter,
     clientNames,
     contactNames,
+    dateFrom,
+    dateTo,
     departmentFilter,
     departmentNames,
     query,
@@ -909,26 +952,27 @@ export function ArticleRequestManager() {
         </td>
         <td className="px-3 py-3">
           <div className="flex items-center justify-end gap-1">
-            <button
-              type="button"
+            <IconButton
+              label={`Edit ${displayDescription(article)}`}
+              tooltipText="Edit request"
+              tooltip="native"
+              variant="ghost"
+              size="sm"
+              icon={<Pencil />}
               onClick={() => openEditDialog(article)}
-              className={rowActionClass}
-              aria-label={`Edit ${displayDescription(article)}`}
-            >
-              <Pencil className="h-3.5 w-3.5" />
-              Edit
-            </button>
-            <button
-              type="button"
+            />
+            <IconButton
+              label={`Delete ${displayDescription(article)}`}
+              tooltipText="Delete request"
+              tooltip="native"
+              variant="danger"
+              size="sm"
+              icon={<Trash2 />}
               onClick={() => {
                 setDeleteError(null)
                 setDeleteTarget(article)
               }}
-              className={rowDangerActionClass}
-              aria-label={`Delete ${displayDescription(article)}`}
-            >
-              <Trash2 className="h-3.5 w-3.5" />
-            </button>
+            />
           </div>
         </td>
       </tr>
@@ -951,27 +995,23 @@ export function ArticleRequestManager() {
           </p>
         </div>
 
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-          <button
-            type="button"
+        <div className="flex items-center gap-2" role="toolbar" aria-label="Article request actions">
+          <IconButton
+            label="Manage batches"
+            icon={<Layers />}
             onClick={() => setBatchManageOpen(true)}
-            className={secondaryButtonClass}
-          >
-            <Layers className="h-4 w-4" />
-            Manage batches
-          </button>
-          <button
-            type="button"
+          />
+          <IconButton
+            label="Import article batch"
+            icon={<Upload />}
             onClick={() => setImportOpen(true)}
-            className={secondaryButtonClass}
-          >
-            <Upload className="h-4 w-4" />
-            Import Article Batch
-          </button>
-          <button type="button" onClick={openCreateDialog} className={primaryButtonClass}>
-            <Plus className="h-4 w-4" />
-            New article request
-          </button>
+          />
+          <IconButton
+            label="New article request"
+            icon={<Plus />}
+            variant="primary"
+            onClick={openCreateDialog}
+          />
         </div>
       </div>
 
@@ -1023,7 +1063,7 @@ export function ArticleRequestManager() {
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-5">
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 xl:grid-cols-8">
             <FilterSelect label="Client" value={clientFilter} onChange={setClientFilter}>
               <option value="">All clients</option>
               {clients.map((client) => (
@@ -1068,7 +1108,107 @@ export function ArticleRequestManager() {
                 </option>
               ))}
             </FilterSelect>
+
+            <FilterSelect
+              label="Billing"
+              value={billingFilter}
+              onChange={(value) =>
+                setBillingFilter(value === 'pending' || value === 'billed' ? value : '')
+              }
+            >
+              <option value="">Pending and billed</option>
+              <option value="pending">Pending billing</option>
+              <option value="billed">Billed (on PI or tax invoice)</option>
+            </FilterSelect>
+
+            <label className="block">
+              <span className="sr-only">Requested from</span>
+              <input
+                type="date"
+                value={dateFrom}
+                max={dateTo || undefined}
+                onChange={(event) => setDateFrom(event.target.value)}
+                aria-label="Requested from date"
+                title="Requested from"
+                className={`${inputClass} py-1.5 text-xs`}
+              />
+            </label>
+
+            <label className="block">
+              <span className="sr-only">Requested to</span>
+              <input
+                type="date"
+                value={dateTo}
+                min={dateFrom || undefined}
+                onChange={(event) => setDateTo(event.target.value)}
+                aria-label="Requested to date"
+                title="Requested to"
+                className={`${inputClass} py-1.5 text-xs`}
+              />
+            </label>
           </div>
+
+          {(billingFilter || dateFrom || dateTo || statusFilter || clientFilter || departmentFilter) && (
+            <div className="flex flex-wrap items-center gap-1.5 text-xs text-slate-500">
+              <span>Filters:</span>
+              {statusFilter && (
+                <FilterChip
+                  label={`Status: ${
+                    statuses.find((status) => status.status_code === statusFilter)?.status_label ??
+                    statusFilter
+                  }`}
+                  onClear={() => setStatusFilter('')}
+                />
+              )}
+              {clientFilter && (
+                <FilterChip
+                  label={`Client: ${clientNames.get(clientFilter) ?? 'Unknown'}`}
+                  onClear={() => setClientFilter('')}
+                />
+              )}
+              {departmentFilter && (
+                <FilterChip
+                  label={`Department: ${departmentNames.get(departmentFilter) ?? 'Unknown'}`}
+                  onClear={() => setDepartmentFilter('')}
+                />
+              )}
+              {billingFilter && (
+                <FilterChip
+                  label={billingFilter === 'pending' ? 'Pending billing' : 'Billed'}
+                  onClear={() => setBillingFilter('')}
+                />
+              )}
+              {(dateFrom || dateTo) && (
+                <FilterChip
+                  label={
+                    dateFrom && dateTo && dateFrom === dateTo
+                      ? `On ${formatDate(dateFrom)}`
+                      : `${dateFrom ? formatDate(dateFrom) : 'Start'} – ${
+                          dateTo ? formatDate(dateTo) : 'today'
+                        }`
+                  }
+                  onClear={() => {
+                    setDateFrom('')
+                    setDateTo('')
+                  }}
+                />
+              )}
+              <button
+                type="button"
+                onClick={() => {
+                  setStatusFilter('')
+                  setClientFilter('')
+                  setDepartmentFilter('')
+                  setBillingFilter('')
+                  setDateFrom('')
+                  setDateTo('')
+                }}
+                className="ml-1 font-medium text-brand-700 hover:underline"
+              >
+                Clear all
+              </button>
+            </div>
+          )}
         </div>
 
         {selectedArticles.length > 0 && (
@@ -1541,6 +1681,22 @@ function FilterSelect({
         {children}
       </select>
     </label>
+  )
+}
+
+function FilterChip({ label, onClear }: { label: string; onClear: () => void }) {
+  return (
+    <span className="inline-flex items-center gap-1 rounded-full border border-brand-200 bg-brand-50 px-2 py-0.5 text-[11px] font-medium text-brand-800">
+      {label}
+      <button
+        type="button"
+        onClick={onClear}
+        aria-label={`Clear filter ${label}`}
+        className="rounded-full p-0.5 text-brand-600 hover:bg-brand-100 hover:text-brand-800"
+      >
+        ×
+      </button>
+    </span>
   )
 }
 

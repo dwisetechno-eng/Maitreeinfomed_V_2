@@ -1,6 +1,8 @@
 'use client'
 
 import type { ReactNode } from 'react'
+import Link from 'next/link'
+import { ArrowUpRight } from 'lucide-react'
 
 import { ClockIcon, CurrencyIcon, ReceiptIcon } from '@/components/ui/icons'
 import { formatCurrency } from '@/lib/dashboard'
@@ -15,6 +17,9 @@ type KpiCardsProps = {
   onProformaCount: number
   taxInvoicedCount: number
 }
+
+const cardLinkClass =
+  'group block rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition hover:border-brand-300 hover:shadow-md focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500'
 
 export function KpiCards({
   proformaValue,
@@ -33,6 +38,7 @@ export function KpiCards({
   return (
     <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
       <KpiCard
+        href="/proforma-invoices"
         label="Total proforma value"
         value={formatCurrency(proformaValue)}
         hint={`${proformaCount} proforma invoice${proformaCount === 1 ? '' : 's'} raised`}
@@ -41,6 +47,7 @@ export function KpiCards({
       />
 
       <KpiCard
+        href="/tax-invoices"
         label="Tax invoice receivables"
         value={formatCurrency(taxValue)}
         hint={`${taxCount} tax invoice${taxCount === 1 ? '' : 's'} on record`}
@@ -51,23 +58,35 @@ export function KpiCards({
       <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
+            <Link
+              href="/article-requests"
+              className="inline-flex items-center gap-1 text-xs font-semibold uppercase tracking-[0.12em] text-slate-500 hover:text-brand-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
+            >
               Pending vs billed articles
-            </p>
+              <ArrowUpRight className="h-3.5 w-3.5" />
+            </Link>
 
             <div className="mt-3 grid grid-cols-2 gap-4">
-              <div>
+              <Link
+                href="/article-requests?billing=pending"
+                className="rounded-lg transition hover:bg-amber-50/70 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
+                title="Open pending article requests"
+              >
                 <p className="text-xs text-slate-500">Pending</p>
                 <p className="mt-0.5 text-2xl font-semibold tracking-tight text-amber-600 tabular-nums">
                   {pendingCount}
                 </p>
-              </div>
-              <div>
+              </Link>
+              <Link
+                href="/article-requests?billing=billed"
+                className="rounded-lg transition hover:bg-brand-50/70 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
+                title="Open billed article requests"
+              >
                 <p className="text-xs text-slate-500">Billed</p>
                 <p className="mt-0.5 text-2xl font-semibold tracking-tight text-brand-700 tabular-nums">
                   {billedCount}
                 </p>
-              </div>
+              </Link>
             </div>
           </div>
 
@@ -82,7 +101,13 @@ export function KpiCards({
         </div>
 
         <p className="mt-2 text-xs text-slate-500">
-          {onProformaCount} awaiting tax invoice · {taxInvoicedCount} tax invoiced
+          <Link href="/article-requests?status=PI_GENERATED" className="hover:text-brand-700 hover:underline">
+            {onProformaCount} awaiting tax invoice
+          </Link>{' '}
+          ·{' '}
+          <Link href="/article-requests?status=COMPLETED" className="hover:text-brand-700 hover:underline">
+            {taxInvoicedCount} tax invoiced
+          </Link>
         </p>
       </article>
     </div>
@@ -90,12 +115,14 @@ export function KpiCards({
 }
 
 function KpiCard({
+  href,
   label,
   value,
   hint,
   icon,
   tone,
 }: {
+  href: string
   label: string
   value: string
   hint: string
@@ -106,10 +133,13 @@ function KpiCard({
     tone === 'brand' ? 'bg-brand-50 text-brand-700' : 'bg-sky-50 text-sky-700'
 
   return (
-    <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+    <Link href={href} className={cardLinkClass} title={`Open ${label.toLowerCase()}`}>
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">{label}</p>
+          <p className="flex items-center gap-1 text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
+            {label}
+            <ArrowUpRight className="h-3.5 w-3.5 text-slate-300 transition group-hover:text-brand-600" />
+          </p>
           <p
             className="mt-2 truncate text-2xl font-semibold tracking-tight text-slate-900 tabular-nums"
             title={value}
@@ -126,7 +156,7 @@ function KpiCard({
       </div>
 
       <p className="mt-2 text-xs text-slate-500">{hint}</p>
-    </article>
+    </Link>
   )
 }
 

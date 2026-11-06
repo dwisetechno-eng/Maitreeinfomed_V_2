@@ -25,12 +25,12 @@ import {
   inputClass,
   labelClass,
   primaryButtonClass,
-  rowActionClass,
   rowDangerActionClass,
   secondaryButtonClass,
 } from '@/components/masters/utils'
 import { Alert } from '@/components/ui/alert'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
+import { IconButton } from '@/components/ui/icon-button'
 import { InboxIcon, PlusIcon, RefreshIcon, SpinnerIcon } from '@/components/ui/icons'
 import { Modal } from '@/components/ui/modal'
 import {
@@ -105,6 +105,14 @@ export function ProformaInvoicesManager() {
   const [query, setQuery] = useState('')
   const [clientFilter, setClientFilter] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const status = params.get('status')
+    const client = params.get('client')
+    if (status) setStatusFilter(status)
+    if (client) setClientFilter(client)
+  }, [])
 
   const [createOpen, setCreateOpen] = useState(false)
 
@@ -771,10 +779,12 @@ export function ProformaInvoicesManager() {
           </p>
         </div>
 
-        <button type="button" onClick={() => setCreateOpen(true)} className={primaryButtonClass}>
-          <PlusIcon className="h-4 w-4" />
-          New proforma invoice
-        </button>
+        <IconButton
+          label="New proforma invoice"
+          icon={<Plus />}
+          variant="primary"
+          onClick={() => setCreateOpen(true)}
+        />
       </div>
 
       {notice && (
@@ -993,71 +1003,68 @@ export function ProformaInvoicesManager() {
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center justify-end gap-1">
-                        <button
-                          type="button"
+                        <IconButton
+                          label={`Manage articles on ${invoice.pi_number ?? 'invoice'}`}
+                          tooltipText="Articles: add or remove linked requests"
+                          tooltip="native"
+                          variant="ghost"
+                          size="sm"
+                          icon={<ListChecks />}
                           onClick={() => {
                             setViewActionError(null)
                             setViewNotice(null)
                             setViewTarget(invoice)
                           }}
-                          className={rowActionClass}
-                          aria-label={`Manage articles on ${invoice.pi_number ?? 'invoice'}`}
-                          title="View and edit the linked article requests"
-                        >
-                          <ListChecks className="h-3.5 w-3.5" />
-                          Articles
-                        </button>
-                        <button
-                          type="button"
+                        />
+                        <IconButton
+                          label={`View ${invoice.pi_number ?? 'invoice'}`}
+                          tooltipText="View invoice"
+                          tooltip="native"
+                          variant="ghost"
+                          size="sm"
+                          icon={<Eye />}
                           onClick={() => setViewTarget(invoice)}
-                          className={rowActionClass}
-                          aria-label={`View ${invoice.pi_number ?? 'invoice'}`}
-                        >
-                          <Eye className="h-3.5 w-3.5" />
-                          View
-                        </button>
-                        <button
-                          type="button"
+                        />
+                        <IconButton
+                          label={`Download ${invoice.pi_number ?? 'invoice'} as Word`}
+                          tooltipText="Download Word (.docx)"
+                          tooltip="native"
+                          variant="ghost"
+                          size="sm"
+                          icon={<Download />}
                           onClick={() => handleDownloadWord(invoice)}
-                          className={rowActionClass}
-                          aria-label={`Download ${invoice.pi_number ?? 'invoice'} as Word`}
-                          title="Download Word (.docx)"
-                        >
-                          <Download className="h-3.5 w-3.5" />
-                          Word
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => openEditDialog(invoice)}
-                          className={rowActionClass}
-                          aria-label={`Edit ${invoice.pi_number ?? 'invoice'}`}
-                          disabled={Boolean(invoice.tax_invoice_id)}
-                          title={
+                        />
+                        <IconButton
+                          label={`Edit ${invoice.pi_number ?? 'invoice'}`}
+                          tooltipText={
                             invoice.tax_invoice_id
-                              ? 'This proforma invoice has been converted to a tax invoice'
-                              : undefined
+                              ? 'Converted to a tax invoice – remove it from the tax invoice first'
+                              : 'Edit invoice details'
                           }
-                        >
-                          <Pencil className="h-3.5 w-3.5" />
-                          Edit
-                        </button>
-                        <button
-                          type="button"
+                          tooltip="native"
+                          variant="ghost"
+                          size="sm"
+                          icon={<Pencil />}
+                          disabled={Boolean(invoice.tax_invoice_id)}
+                          onClick={() => openEditDialog(invoice)}
+                        />
+                        <IconButton
+                          label={`Delete ${invoice.pi_number ?? 'invoice'}`}
+                          tooltipText={
+                            invoice.tax_invoice_id
+                              ? 'Remove this proforma invoice from its tax invoice first'
+                              : 'Delete invoice'
+                          }
+                          tooltip="native"
+                          variant="danger"
+                          size="sm"
+                          icon={<Trash2 />}
+                          disabled={Boolean(invoice.tax_invoice_id)}
                           onClick={() => {
                             setDeleteError(null)
                             setDeleteTarget(invoice)
                           }}
-                          className={rowDangerActionClass}
-                          aria-label={`Delete ${invoice.pi_number ?? 'invoice'}`}
-                          disabled={Boolean(invoice.tax_invoice_id)}
-                          title={
-                            invoice.tax_invoice_id
-                              ? 'Remove this proforma invoice from its tax invoice first'
-                              : undefined
-                          }
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
+                        />
                       </div>
                     </td>
                   </tr>

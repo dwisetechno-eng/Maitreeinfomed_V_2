@@ -28,13 +28,12 @@ import {
   inputClass,
   labelClass,
   primaryButtonClass,
-  rowActionClass,
-  rowDangerActionClass,
   roundMoney,
   secondaryButtonClass,
 } from '@/components/masters/utils'
 import { Alert } from '@/components/ui/alert'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
+import { IconButton } from '@/components/ui/icon-button'
 import { Modal } from '@/components/ui/modal'
 import { SpinnerIcon } from '@/components/ui/icons'
 import { isMissingTableError } from '@/lib/supabase-errors'
@@ -453,6 +452,8 @@ export function PaymentReceiptManager() {
     }
   }
 
+  const editingReceipt: ReceiptRow | null = dialog?.mode === 'edit' ? dialog.row : null
+
   const allocateReceipt: ReceiptForAllocation | null = allocateTarget
     ? {
         id: allocateTarget.id,
@@ -482,15 +483,18 @@ export function PaymentReceiptManager() {
           </p>
         </div>
 
-        <button
-          type="button"
+        <IconButton
+          label="Log payment receipt"
+          tooltipText={
+            !loading && clients.length === 0
+              ? 'Add a client before logging a receipt'
+              : 'Log payment receipt'
+          }
+          icon={<Plus />}
+          variant="primary"
           onClick={openCreateDialog}
-          className={primaryButtonClass}
           disabled={loading || clients.length === 0}
-        >
-          <Plus className="h-4 w-4" />
-          Log payment receipt
-        </button>
+        />
       </div>
 
       {notice && (
@@ -716,43 +720,43 @@ export function PaymentReceiptManager() {
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center justify-end gap-1">
-                          <button
-                            type="button"
-                            onClick={() => setAllocateTarget(receipt)}
-                            disabled={!receipt.client_id || remaining <= EPSILON}
-                            className={rowActionClass}
-                            aria-label={`Apply ${receipt.receipt_number} to invoices`}
-                            title={
+                          <IconButton
+                            label={`Allocations for ${receipt.receipt_number}`}
+                            tooltipText={
                               !receipt.client_id
                                 ? 'This receipt has no client'
                                 : remaining <= EPSILON
-                                  ? 'This receipt is fully applied'
-                                  : 'Apply to tax invoices'
+                                  ? 'Fully applied – open to review or remove allocations'
+                                  : 'Apply to tax invoices or change allocations'
                             }
-                          >
-                            <Coins className="h-3.5 w-3.5" />
-                            Apply
-                          </button>
-                          <button
-                            type="button"
+                            tooltip="native"
+                            variant="ghost"
+                            size="sm"
+                            icon={<Coins />}
+                            disabled={!receipt.client_id}
+                            onClick={() => setAllocateTarget(receipt)}
+                          />
+                          <IconButton
+                            label={`Edit ${receipt.receipt_number}`}
+                            tooltipText="Edit receipt"
+                            tooltip="native"
+                            variant="ghost"
+                            size="sm"
+                            icon={<Pencil />}
                             onClick={() => openEditDialog(receipt)}
-                            className={rowActionClass}
-                            aria-label={`Edit ${receipt.receipt_number}`}
-                          >
-                            <Pencil className="h-3.5 w-3.5" />
-                            Edit
-                          </button>
-                          <button
-                            type="button"
+                          />
+                          <IconButton
+                            label={`Delete ${receipt.receipt_number}`}
+                            tooltipText="Delete receipt"
+                            tooltip="native"
+                            variant="danger"
+                            size="sm"
+                            icon={<Trash2 />}
                             onClick={() => {
                               setDeleteError(null)
                               setDeleteTarget(receipt)
                             }}
-                            className={rowDangerActionClass}
-                            aria-label={`Delete ${receipt.receipt_number}`}
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </button>
+                          />
                         </div>
                       </td>
                     </tr>
@@ -890,7 +894,25 @@ export function PaymentReceiptManager() {
             />
           </div>
 
-          <div className="flex justify-end gap-2 border-t border-slate-200 pt-4">
+          <div className="flex flex-wrap justify-end gap-2 border-t border-slate-200 pt-4">
+            {editingReceipt?.client_id && (
+              <button
+                type="button"
+                onClick={() => {
+                  if (saving) {
+                    return
+                  }
+                  setDialog(null)
+                  setFormError(null)
+                  setAllocateTarget(editingReceipt)
+                }}
+                disabled={saving}
+                className={`${secondaryButtonClass} mr-auto`}
+              >
+                <Coins className="h-4 w-4" />
+                Manage allocations
+              </button>
+            )}
             <button
               type="button"
               onClick={() => setDialog(null)}

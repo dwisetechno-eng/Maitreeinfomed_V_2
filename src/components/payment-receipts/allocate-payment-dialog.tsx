@@ -443,7 +443,7 @@ export function AllocatePaymentDialog({
       open={open}
       onClose={closeDialog}
       size="3xl"
-      title="Apply payment to tax invoices"
+      title="Payment allocations"
       description={
         receipt
           ? `${receipt.receipt_number} · ${receipt.client_name} · ${formatCurrency(receiptTotal)}`
