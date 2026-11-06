@@ -1611,12 +1611,22 @@ function normalizeUrgency(value: string | null | undefined): string {
   return (URGENCIES as readonly string[]).includes(normalized) ? normalized : 'MEDIUM'
 }
 
+const TITLE_CASE_ACRONYMS = new Set(['PI', 'TI', 'GST'])
+
 function titleCase(value: string): string {
   return value
     .toLowerCase()
     .split(/[\s_]+/)
     .filter(Boolean)
-    .map((part) => part.slice(0, 1).toUpperCase() + part.slice(1))
+    .map((part) => {
+      const upper = part.toUpperCase()
+
+      if (TITLE_CASE_ACRONYMS.has(upper)) {
+        return upper
+      }
+
+      return part.slice(0, 1).toUpperCase() + part.slice(1)
+    })
     .join(' ')
 }
 

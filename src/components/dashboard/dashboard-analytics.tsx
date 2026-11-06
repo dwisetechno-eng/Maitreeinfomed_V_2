@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 
 import { ArticleTimeline } from '@/components/dashboard/article-timeline'
 import { KpiCards, KpiCardsSkeleton } from '@/components/dashboard/kpi-cards'
+import { ModuleLinks } from '@/components/dashboard/module-links'
 import { StatusBreakdown } from '@/components/dashboard/status-breakdown'
 import {
   SUPABASE_SETUP_MESSAGE,
@@ -182,6 +183,18 @@ export function DashboardAnalytics() {
           {error}
         </Alert>
       )}
+
+      <ModuleLinks
+        stats={
+          kpis
+            ? {
+                articles: kpis.pending + kpis.billed,
+                proformas: kpis.proformaCount,
+                taxInvoices: kpis.taxCount,
+              }
+            : undefined
+        }
+      />
 
       {!snapshot && loading ? (
         <>

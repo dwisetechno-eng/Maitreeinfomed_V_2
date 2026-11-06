@@ -44,7 +44,7 @@ import {
   PI_GENERATED_STATUS,
   recalculateProformaTotals,
 } from '@/lib/invoice-links'
-import { extractMissingColumn, roundMoney } from '@/lib/proforma-invoices'
+import { DEFAULT_TAX_RATE, extractMissingColumn, roundMoney } from '@/lib/proforma-invoices'
 import { isMissingColumnError } from '@/lib/supabase-errors'
 import { createClient } from '@/utils/supabase/client'
 
@@ -116,6 +116,7 @@ export function ProformaInvoicesManager() {
   const [viewSelectedIds, setViewSelectedIds] = useState<Set<string>>(new Set())
   const [viewSaving, setViewSaving] = useState(false)
   const [viewActionError, setViewActionError] = useState<string | null>(null)
+  const [viewNotice, setViewNotice] = useState<string | null>(null)
 
   const [editTarget, setEditTarget] = useState<ProformaInvoiceRow | null>(null)
   const [editForm, setEditForm] = useState<EditForm>(EMPTY_EDIT_FORM)
@@ -244,32 +245,22 @@ export function ProformaInvoicesManager() {
 
   const viewLocked = Boolean(viewTarget?.tax_invoice_id)
 
-  const refreshViewTarget = useCallback(async (invoiceId: string) => {
-    const supabase = createClient()
-    const { data, error } = await supabase
-      .from('proforma_invoices')
-      .select('*')
-      .eq('id', invoiceId)
-      .maybeSingle()
-
-    if (!error && data) {
-      setViewTarget(data as ProformaInvoiceRow)
-    }
-  }, [])
-
   useEffect(() => {
     if (!viewTarget) {
       setViewArticles([])
       setViewAvailable([])
       setViewError(null)
       setViewActionError(null)
+      setViewNotice(null)
       setViewPickerOpen(false)
       setViewSelectedIds(new Set())
       return
     }
 
     let cancelled = false
-    const invoice = viewTarget
+    const invoiceId = viewTarget.id
+    const clientId = viewTarget.client_id
+    const taxInvoiceId = viewTarget.tax_invoice_id
 
     async function loadViewData() {
       setViewLoading(true)
@@ -280,7 +271,7 @@ export function ProformaInvoicesManager() {
         const linkedResult = await supabase
           .from('article_requests')
           .select('*')
-          .eq('proforma_invoice_id', invoice.id)
+          .eq('proforma_invoice_id', invoiceId)
           .order('created_at', { ascending: true })
 
         if (linkedResult.error) {
@@ -292,13 +283,13 @@ export function ProformaInvoicesManager() {
         // Requests that are not on any invoice for the same client can be
         // pulled into this proforma. A billed proforma is locked, so we skip
         // the query entirely.
-        if (invoice.client_id && !invoice.tax_invoice_id) {
+        if (clientId && !taxInvoiceId) {
           const availableResult = await supabase
             .from('article_requests')
             .select('*')
             .is('proforma_invoice_id', null)
             .is('tax_invoice_id', null)
-            .eq('client_id', invoice.client_id)
+            .eq('client_id', clientId)
             .order('request_date', { ascending: false, nullsFirst: false })
             .order('created_at', { ascending: false })
 
@@ -331,7 +322,10 @@ export function ProformaInvoicesManager() {
     return () => {
       cancelled = true
     }
-  }, [viewTarget])
+    // Re-run only when the invoice identity or its billing link changes. Totals
+    // edits must not reload (and flash) the article list.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewTarget?.id, viewTarget?.client_id, viewTarget?.tax_invoice_id])
 
   async function handleRemoveArticle(article: LinkedArticle) {
     if (!viewTarget) {
@@ -347,6 +341,12 @@ export function ProformaInvoicesManager() {
 
     setViewSaving(true)
     setViewActionError(null)
+    setViewNotice(null)
+
+    const invoice = viewTarget
+    const previousArticles = viewArticles
+    const previousAvailable = viewAvailable
+    const previousTarget = viewTarget
 
     try {
       const supabase = createClient()
@@ -365,10 +365,60 @@ export function ProformaInvoicesManager() {
         throw error
       }
 
-      await recalculateProformaTotals(supabase, viewTarget.id)
-      await refreshViewTarget(viewTarget.id)
+      // Update the modal immediately so the row disappears without waiting for
+      // a refetch, then reconcile the totals with the server below.
+      const remaining = previousArticles.filter((row) => row.id !== article.id)
+      const optimistic = totalsFor(remaining, invoice.tax_rate)
+
+      setViewArticles(remaining)
+      setViewAvailable((current) => [
+        {
+          ...article,
+          proforma_invoice_id: null,
+          tax_invoice_id: null,
+          status_code: pendingStatus,
+        },
+        ...current.filter((row) => row.id !== article.id),
+      ])
+      setViewTarget((current) =>
+        current
+          ? {
+              ...current,
+              subtotal: optimistic.subtotal,
+              tax_amount: optimistic.taxAmount,
+              grand_total: optimistic.grandTotal,
+            }
+          : current
+      )
+
+      const totals = await recalculateProformaTotals(supabase, invoice.id)
+
+      if (totals) {
+        setViewTarget((current) =>
+          current
+            ? {
+                ...current,
+                subtotal: totals.subtotal,
+                tax_amount: totals.tax_amount,
+                grand_total: totals.grand_total,
+              }
+            : current
+        )
+      }
+
+      setViewNotice(
+        `Removed “${getArticleTitle(article)}” from this invoice. Totals were updated.`
+      )
+      setViewSelectedIds((current) => {
+        const next = new Set(current)
+        next.delete(article.id)
+        return next
+      })
       await loadData({ silent: true })
     } catch (error) {
+      setViewArticles(previousArticles)
+      setViewAvailable(previousAvailable)
+      setViewTarget((current) => (current ? previousTarget : current))
       setViewActionError(
         getErrorMessage(error, 'Unable to remove the article request from this invoice.')
       )
@@ -391,30 +441,76 @@ export function ProformaInvoicesManager() {
 
     setViewSaving(true)
     setViewActionError(null)
+    setViewNotice(null)
+
+    const invoice = viewTarget
+    const selectedIds = new Set(viewSelectedIds)
+    const selected = viewAvailable.filter((row) => selectedIds.has(row.id))
+    const previousArticles = viewArticles
+    const previousAvailable = viewAvailable
+    const previousTarget = viewTarget
 
     try {
       const supabase = createClient()
-      const ids = Array.from(viewSelectedIds)
-
       const { error } = await supabase
         .from('article_requests')
         .update({
-          proforma_invoice_id: viewTarget.id,
+          proforma_invoice_id: invoice.id,
           status_code: PI_GENERATED_STATUS,
         })
-        .in('id', ids)
+        .in('id', Array.from(selectedIds))
         .is('proforma_invoice_id', null)
 
       if (error) {
         throw error
       }
 
-      await recalculateProformaTotals(supabase, viewTarget.id)
+      const linked = selected.map((row) => ({
+        ...row,
+        proforma_invoice_id: invoice.id,
+        status_code: PI_GENERATED_STATUS,
+      }))
+      const nextArticles = [...previousArticles, ...linked]
+      const optimistic = totalsFor(nextArticles, invoice.tax_rate)
+
+      setViewArticles(nextArticles)
+      setViewAvailable((current) => current.filter((row) => !selectedIds.has(row.id)))
+      setViewTarget((current) =>
+        current
+          ? {
+              ...current,
+              subtotal: optimistic.subtotal,
+              tax_amount: optimistic.taxAmount,
+              grand_total: optimistic.grandTotal,
+            }
+          : current
+      )
       setViewSelectedIds(new Set())
       setViewPickerOpen(false)
-      await refreshViewTarget(viewTarget.id)
+
+      const totals = await recalculateProformaTotals(supabase, invoice.id)
+
+      if (totals) {
+        setViewTarget((current) =>
+          current
+            ? {
+                ...current,
+                subtotal: totals.subtotal,
+                tax_amount: totals.tax_amount,
+                grand_total: totals.grand_total,
+              }
+            : current
+        )
+      }
+
+      setViewNotice(
+        `Added ${linked.length} article request${linked.length === 1 ? '' : 's'} to this invoice. Totals were updated.`
+      )
       await loadData({ silent: true })
     } catch (error) {
+      setViewArticles(previousArticles)
+      setViewAvailable(previousAvailable)
+      setViewTarget((current) => (current ? previousTarget : current))
       setViewActionError(
         getErrorMessage(error, 'Unable to add the selected article requests to this invoice.')
       )
@@ -1029,7 +1125,9 @@ export function ProformaInvoicesManager() {
                     onClick={() => {
                       setViewPickerOpen((open) => !open)
                       setViewActionError(null)
+                      setViewNotice(null)
                     }}
+                    disabled={viewLoading}
                     className={`${secondaryButtonClass} px-2.5 py-1.5 text-xs`}
                   >
                     <Plus className="h-3.5 w-3.5" />
@@ -1040,8 +1138,9 @@ export function ProformaInvoicesManager() {
 
               {viewLocked && (
                 <div className="border-b border-amber-200 bg-amber-50 px-4 py-2.5 text-xs text-amber-800">
-                  This proforma invoice has been converted to a tax invoice. Remove or add the
-                  linked tax invoice first to edit these articles.
+                  This proforma invoice has already been converted to a tax invoice. To change
+                  these articles, open the tax invoice and remove this proforma invoice from it
+                  first.
                 </div>
               )}
 
@@ -1057,6 +1156,14 @@ export function ProformaInvoicesManager() {
                 <div className="px-4 py-3">
                   <Alert tone="error" onDismiss={() => setViewActionError(null)}>
                     {viewActionError}
+                  </Alert>
+                </div>
+              )}
+
+              {viewNotice && (
+                <div className="px-4 py-3">
+                  <Alert tone="success" onDismiss={() => setViewNotice(null)}>
+                    {viewNotice}
                   </Alert>
                 </div>
               )}
@@ -1369,6 +1476,21 @@ export function ProformaInvoicesManager() {
       />
     </div>
   )
+}
+
+function totalsFor(articles: LinkedArticle[], taxRate: number | null | undefined) {
+  const subtotal = roundMoney(
+    articles.reduce((total, article) => total + articleLinkAmount(article), 0)
+  )
+  const rate = Number(taxRate)
+  const safeRate = Number.isFinite(rate) && rate >= 0 ? rate : DEFAULT_TAX_RATE
+  const taxAmount = roundMoney((subtotal * safeRate) / 100)
+
+  return {
+    subtotal,
+    taxAmount,
+    grandTotal: roundMoney(subtotal + taxAmount),
+  }
 }
 
 async function updateWithColumnFallback(
