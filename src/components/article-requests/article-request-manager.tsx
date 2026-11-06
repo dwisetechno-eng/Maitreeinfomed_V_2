@@ -1,7 +1,7 @@
 'use client'
 
 import type { FormEvent } from 'react'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
 import {
   FileText,
   Layers,
@@ -45,7 +45,8 @@ import {
   getArticleTitle,
   type ArticleRequestRow,
 } from '@/lib/article-request-meta'
-import { isMissingColumnError } from '@/lib/supabase-errors'
+import { deriveArticleStatus } from '@/lib/invoice-links'
+import { isMissingColumnError, isMissingTableError } from '@/lib/supabase-errors'
 import { createClient } from '@/utils/supabase/client'
 
 type ClientRow = { id: string; company_name: string }
@@ -53,6 +54,18 @@ type DepartmentRow = { id: string; department_name: string; client_id: string | 
 type VendorRow = { id: string; vendor_name: string }
 type ContactRow = { id: string; client_id: string | null; contact_name: string }
 type StatusRow = { status_code: string; status_label: string; display_order: number | null }
+type ProformaInfoRow = { id: string; pi_number: string | null; status_code: string | null }
+type TaxInfoRow = { id: string; tax_invoice_number: string | null; status_code: string | null }
+
+type ArticleGroup = {
+  key: string
+  clientLabel: string
+  departments: Array<{
+    key: string
+    departmentLabel: string
+    articles: ArticleRow[]
+  }>
+}
 
 type ArticleRow = {
   id: string
@@ -127,6 +140,9 @@ export function ArticleRequestManager() {
   const [vendors, setVendors] = useState<VendorRow[]>([])
   const [contacts, setContacts] = useState<ContactRow[]>([])
   const [statuses, setStatuses] = useState<StatusRow[]>([])
+  const [proformaRows, setProformaRows] = useState<ProformaInfoRow[]>([])
+  const [taxRows, setTaxRows] = useState<TaxInfoRow[]>([])
+  const [grouped, setGrouped] = useState(true)
 
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -194,6 +210,43 @@ export function ArticleRequestManager() {
     return map
   }, [statuses])
 
+  const proformaMap = useMemo(() => {
+    const map = new Map<string, ProformaInfoRow>()
+    for (const row of proformaRows) {
+      map.set(row.id, row)
+    }
+    return map
+  }, [proformaRows])
+
+  const taxMap = useMemo(() => {
+    const map = new Map<string, TaxInfoRow>()
+    for (const row of taxRows) {
+      map.set(row.id, row)
+    }
+    return map
+  }, [taxRows])
+
+  // The status column follows the invoice lifecycle: a request on a tax
+  // invoice that is paid shows COMPLETED, any other invoice link shows
+  // PI_GENERATED, and unlinked requests keep their stored status.
+  const articleStatuses = useMemo(() => {
+    const map = new Map<string, string>()
+
+    for (const article of articles) {
+      const proforma = article.proforma_invoice_id
+        ? proformaMap.get(article.proforma_invoice_id)
+        : undefined
+      const taxInvoice = article.tax_invoice_id ? taxMap.get(article.tax_invoice_id) : undefined
+
+      map.set(
+        article.id,
+        deriveArticleStatus(article, proforma?.status_code, taxInvoice?.status_code) ?? ''
+      )
+    }
+
+    return map
+  }, [articles, proformaMap, taxMap])
+
   const loadData = useCallback(async (options?: { silent?: boolean }) => {
     if (!options?.silent) {
       setLoading(true)
@@ -208,25 +261,39 @@ export function ArticleRequestManager() {
 
     try {
       const supabase = createClient()
-      const [articlesResult, clientsResult, departmentsResult, vendorsResult, contactsResult, statusesResult] =
-        await Promise.all([
-          supabase.from('article_requests').select('*').order('request_date', { ascending: false }),
-          supabase.from('clients').select('id, company_name').order('company_name', { ascending: true }),
-          supabase
-            .from('departments')
-            .select('id, department_name, client_id')
-            .order('department_name', { ascending: true }),
-          supabase.from('vendors').select('id, vendor_name').order('vendor_name', { ascending: true }),
-          supabase
-            .from('client_contacts')
-            .select('id, client_id, contact_name')
-            .order('contact_name', { ascending: true }),
-          supabase
-            .from('article_status_master')
-            .select('status_code, status_label, display_order')
-            .order('display_order', { ascending: true })
-            .order('status_code', { ascending: true }),
-        ])
+      const [
+        articlesResult,
+        clientsResult,
+        departmentsResult,
+        vendorsResult,
+        contactsResult,
+        statusesResult,
+        proformaResult,
+        taxResult,
+      ] = await Promise.all([
+        supabase
+          .from('article_requests')
+          .select('*')
+          .order('request_date', { ascending: false, nullsFirst: false })
+          .order('created_at', { ascending: false }),
+        supabase.from('clients').select('id, company_name').order('company_name', { ascending: true }),
+        supabase
+          .from('departments')
+          .select('id, department_name, client_id')
+          .order('department_name', { ascending: true }),
+        supabase.from('vendors').select('id, vendor_name').order('vendor_name', { ascending: true }),
+        supabase
+          .from('client_contacts')
+          .select('id, client_id, contact_name')
+          .order('contact_name', { ascending: true }),
+        supabase
+          .from('article_status_master')
+          .select('status_code, status_label, display_order')
+          .order('display_order', { ascending: true })
+          .order('status_code', { ascending: true }),
+        supabase.from('proforma_invoices').select('id, pi_number, status_code'),
+        supabase.from('tax_invoices').select('id, tax_invoice_number, status_code'),
+      ])
 
       const firstError =
         articlesResult.error ??
@@ -234,10 +301,16 @@ export function ArticleRequestManager() {
         departmentsResult.error ??
         vendorsResult.error ??
         contactsResult.error ??
-        statusesResult.error
+        statusesResult.error ??
+        proformaResult.error
 
       if (firstError) {
         throw firstError
+      }
+
+      // Optional tables may be absent before the invoicing migration runs.
+      if (taxResult.error && !isMissingTableError(taxResult.error) && !isMissingColumnError(taxResult.error)) {
+        throw taxResult.error
       }
 
       setArticles((articlesResult.data ?? []) as ArticleRow[])
@@ -246,6 +319,8 @@ export function ArticleRequestManager() {
       setVendors((vendorsResult.data ?? []) as VendorRow[])
       setContacts((contactsResult.data ?? []) as ContactRow[])
       setStatuses((statusesResult.data ?? []) as StatusRow[])
+      setProformaRows((proformaResult.data ?? []) as ProformaInfoRow[])
+      setTaxRows(taxResult.error ? [] : ((taxResult.data ?? []) as TaxInfoRow[]))
     } catch (error) {
       setLoadError(getErrorMessage(error, 'Unable to load article requests.'))
     } finally {
@@ -299,7 +374,7 @@ export function ArticleRequestManager() {
   const filteredArticles = useMemo(() => {
     const term = query.trim().toLowerCase()
 
-    return articles.filter((article) => {
+    const filtered = articles.filter((article) => {
       if (clientFilter && article.client_id !== clientFilter) {
         return false
       }
@@ -316,7 +391,7 @@ export function ArticleRequestManager() {
         return false
       }
 
-      if (statusFilter && article.status_code !== statusFilter) {
+      if (statusFilter && (articleStatuses.get(article.id) ?? '') !== statusFilter) {
         return false
       }
 
@@ -335,8 +410,11 @@ export function ArticleRequestManager() {
         .toLowerCase()
         .includes(term)
     })
+
+    return filtered.sort(compareLatestFirst)
   }, [
     articles,
+    articleStatuses,
     clientFilter,
     clientNames,
     contactNames,
@@ -348,6 +426,58 @@ export function ArticleRequestManager() {
     vendorFilter,
     vendorNames,
   ])
+
+  const articleGroups = useMemo<ArticleGroup[]>(() => {
+    const clients = new Map<
+      string,
+      {
+        key: string
+        clientLabel: string
+        departments: Map<string, { key: string; departmentLabel: string; articles: ArticleRow[] }>
+      }
+    >()
+
+    for (const article of filteredArticles) {
+      const clientKey = article.client_id ?? '__none__'
+      const clientLabel = article.client_id
+        ? clientNames.get(article.client_id) ?? 'Unknown client'
+        : 'No client'
+      const departmentKey = article.department_id ?? '__none__'
+      const departmentLabel = article.department_id
+        ? departmentNames.get(article.department_id) ?? 'Unknown department'
+        : 'No department'
+
+      let client = clients.get(clientKey)
+
+      if (!client) {
+        client = { key: clientKey, clientLabel, departments: new Map() }
+        clients.set(clientKey, client)
+      }
+
+      let department = client.departments.get(departmentKey)
+
+      if (!department) {
+        department = {
+          key: `${clientKey}:${departmentKey}`,
+          departmentLabel,
+          articles: [],
+        }
+        client.departments.set(departmentKey, department)
+      }
+
+      department.articles.push(article)
+    }
+
+    return [...clients.values()]
+      .sort((a, b) => a.clientLabel.localeCompare(b.clientLabel))
+      .map((client) => ({
+        key: client.key,
+        clientLabel: client.clientLabel,
+        departments: [...client.departments.values()].sort((a, b) =>
+          a.departmentLabel.localeCompare(b.departmentLabel)
+        ),
+      }))
+  }, [clientNames, departmentNames, filteredArticles])
 
   const selectableFiltered = useMemo(
     () =>
@@ -651,6 +781,160 @@ export function ArticleRequestManager() {
     }
   }
 
+  function renderArticleRow(article: ArticleRow) {
+    const urgency = normalizeUrgency(article.urgency)
+    const cost = unitCost(article)
+    const quantity = unitQuantity(article)
+    const selected = selectedIds.has(article.id)
+    const canBill = !article.tax_invoice_id && !article.proforma_invoice_id
+    const batchLabel = displayBatch(article)
+    const displayStatus = articleStatuses.get(article.id) ?? ''
+    const isLinked = Boolean(article.proforma_invoice_id || article.tax_invoice_id)
+    const proforma = article.proforma_invoice_id
+      ? proformaMap.get(article.proforma_invoice_id)
+      : undefined
+    const taxInvoice = article.tax_invoice_id ? taxMap.get(article.tax_invoice_id) : undefined
+
+    return (
+      <tr
+        key={article.id}
+        className={selected ? 'bg-brand-50/50' : 'transition-colors hover:bg-slate-50/70'}
+      >
+        <td className="px-3 py-3">
+          <input
+            type="checkbox"
+            checked={selected}
+            disabled={!canBill}
+            onChange={() => toggleRow(article.id)}
+            aria-label={`Select ${displayDescription(article)}`}
+            className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500 disabled:cursor-not-allowed disabled:opacity-40"
+          />
+        </td>
+        <td className="whitespace-nowrap px-3 py-3 text-slate-600">
+          {formatDate(article.request_date ?? article.created_at)}
+        </td>
+        <td className="px-3 py-3 font-medium text-slate-900">
+          {article.client_id ? clientNames.get(article.client_id) ?? 'Unknown client' : '—'}
+        </td>
+        <td className="px-3 py-3 text-slate-600">
+          {article.department_id ? departmentNames.get(article.department_id) ?? '—' : '—'}
+        </td>
+        <td className="px-3 py-3 text-slate-600">
+          {article.contact_id ? contactNames.get(article.contact_id) ?? '—' : '—'}
+        </td>
+        <td className="px-3 py-3">
+          {batchLabel ? (
+            <span
+              className="inline-flex max-w-40 items-center truncate rounded bg-slate-100 px-1.5 py-0.5 text-[11px] font-medium text-slate-600"
+              title={batchLabel}
+            >
+              {batchLabel}
+            </span>
+          ) : (
+            <span className="text-slate-400">—</span>
+          )}
+        </td>
+        <td className="max-w-[18rem] px-3 py-3">
+          <p className="truncate font-medium text-slate-900" title={displayDescription(article)}>
+            {displayDescription(article)}
+          </p>
+          <div className="mt-0.5 flex flex-wrap items-center gap-1">
+            {article.proforma_invoice_id && (
+              <span
+                className="inline-flex items-center rounded bg-indigo-50 px-1.5 py-0.5 font-mono text-[10px] font-medium text-indigo-700"
+                title="Proforma invoice"
+              >
+                {proforma?.pi_number?.trim() || 'PI linked'}
+              </span>
+            )}
+            {article.tax_invoice_id && (
+              <span
+                className="inline-flex items-center rounded bg-emerald-50 px-1.5 py-0.5 font-mono text-[10px] font-medium text-emerald-700"
+                title="Tax invoice"
+              >
+                {taxInvoice?.tax_invoice_number?.trim() || 'TI linked'}
+              </span>
+            )}
+          </div>
+        </td>
+        <td className="px-3 py-3 text-slate-600">
+          {article.vendor_id ? vendorNames.get(article.vendor_id) ?? '—' : '—'}
+        </td>
+        <td className="whitespace-nowrap px-3 py-3 text-right tabular-nums text-slate-600">
+          {formatCurrency(cost)}
+        </td>
+        <td className="px-3 py-3 text-right tabular-nums text-slate-600">{quantity}</td>
+        <td className="whitespace-nowrap px-3 py-3 text-right font-medium tabular-nums text-slate-900">
+          {formatCurrency(roundMoney(cost * quantity))}
+        </td>
+        <td className="px-3 py-3">
+          <span className={`${badgeClass} ${URGENCY_TONES[urgency] ?? URGENCY_TONES.MEDIUM}`}>
+            {titleCase(urgency)}
+          </span>
+        </td>
+        <td className="px-3 py-3">
+          {isLinked ? (
+            <span
+              className={`${badgeClass} ${
+                STATUS_TONES[displayStatus] ?? 'bg-slate-100 text-slate-600 ring-slate-500/20'
+              }`}
+              title="Status follows the linked invoice"
+            >
+              {displayStatus ? titleCase(displayStatus) : '—'}
+            </span>
+          ) : (
+            <div className="relative">
+              <select
+                value={article.status_code ?? ''}
+                onChange={(event) => void handleStatusChange(article, event.target.value)}
+                disabled={statusSavingId === article.id}
+                aria-label={`Change status for ${displayDescription(article)}`}
+                className={`w-full min-w-36 cursor-pointer appearance-none rounded-full border-0 py-1 pl-2.5 pr-7 text-xs font-semibold outline-none ring-1 ring-inset focus:ring-2 focus:ring-brand-500 disabled:opacity-60 ${
+                  STATUS_TONES[article.status_code ?? ''] ??
+                  'bg-slate-100 text-slate-600 ring-slate-500/20'
+                }`}
+              >
+                <option value="">Unassigned</option>
+                {statuses.map((status) => (
+                  <option key={status.status_code} value={status.status_code}>
+                    {status.status_label}
+                  </option>
+                ))}
+              </select>
+              <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-[10px] opacity-70">
+                ▾
+              </span>
+            </div>
+          )}
+        </td>
+        <td className="px-3 py-3">
+          <div className="flex items-center justify-end gap-1">
+            <button
+              type="button"
+              onClick={() => openEditDialog(article)}
+              className={rowActionClass}
+              aria-label={`Edit ${displayDescription(article)}`}
+            >
+              <Pencil className="h-3.5 w-3.5" />
+              Edit
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setDeleteError(null)
+                setDeleteTarget(article)
+              }}
+              className={rowDangerActionClass}
+              aria-label={`Delete ${displayDescription(article)}`}
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        </td>
+      </tr>
+    )
+  }
+
   return (
     <div className="space-y-5">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
@@ -717,6 +1001,16 @@ export function ArticleRequestManager() {
                 {filteredArticles.length} of {articles.length}{' '}
                 {articles.length === 1 ? 'request' : 'requests'}
               </p>
+              <button
+                type="button"
+                onClick={() => setGrouped((value) => !value)}
+                aria-pressed={grouped}
+                className={`${secondaryButtonClass} px-2.5 py-1.5`}
+                title={grouped ? 'Show a flat list' : 'Group by client and department'}
+              >
+                <Layers className="h-4 w-4" />
+                <span className="hidden sm:inline">{grouped ? 'Grouped' : 'Flat'}</span>
+              </button>
               <button
                 type="button"
                 onClick={() => void loadData()}
@@ -900,142 +1194,33 @@ export function ArticleRequestManager() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {filteredArticles.map((article) => {
-                  const urgency = normalizeUrgency(article.urgency)
-                  const cost = unitCost(article)
-                  const quantity = unitQuantity(article)
-                  const selected = selectedIds.has(article.id)
-                  const canBill = !article.tax_invoice_id && !article.proforma_invoice_id
-                  const batchLabel = displayBatch(article)
-
-                  return (
-                    <tr
-                      key={article.id}
-                      className={selected ? 'bg-brand-50/50' : 'transition-colors hover:bg-slate-50/70'}
-                    >
-                      <td className="px-3 py-3">
-                        <input
-                          type="checkbox"
-                          checked={selected}
-                          disabled={!canBill}
-                          onChange={() => toggleRow(article.id)}
-                          aria-label={`Select ${displayDescription(article)}`}
-                          className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500 disabled:cursor-not-allowed disabled:opacity-40"
-                        />
-                      </td>
-                      <td className="whitespace-nowrap px-3 py-3 text-slate-600">
-                        {formatDate(article.request_date ?? article.created_at)}
-                      </td>
-                      <td className="px-3 py-3 font-medium text-slate-900">
-                        {article.client_id
-                          ? clientNames.get(article.client_id) ?? 'Unknown client'
-                          : '—'}
-                      </td>
-                      <td className="px-3 py-3 text-slate-600">
-                        {article.department_id
-                          ? departmentNames.get(article.department_id) ?? '—'
-                          : '—'}
-                      </td>
-                      <td className="px-3 py-3 text-slate-600">
-                        {article.contact_id
-                          ? contactNames.get(article.contact_id) ?? '—'
-                          : '—'}
-                      </td>
-                      <td className="px-3 py-3">
-                        {batchLabel ? (
-                          <span
-                            className="inline-flex max-w-40 items-center truncate rounded bg-slate-100 px-1.5 py-0.5 text-[11px] font-medium text-slate-600"
-                            title={batchLabel}
+                {grouped
+                  ? articleGroups.map((client) => (
+                      <Fragment key={client.key}>
+                        <tr className="bg-slate-100/80">
+                          <td
+                            colSpan={14}
+                            className="px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-700"
                           >
-                            {batchLabel}
-                          </span>
-                        ) : (
-                          <span className="text-slate-400">—</span>
-                        )}
-                      </td>
-                      <td className="max-w-[18rem] px-3 py-3">
-                        <p className="truncate font-medium text-slate-900" title={displayDescription(article)}>
-                          {displayDescription(article)}
-                        </p>
-                        <div className="mt-0.5 flex flex-wrap items-center gap-1">
-                          {article.proforma_invoice_id && (
-                            <span className="inline-flex items-center rounded bg-indigo-50 px-1.5 py-0.5 text-[10px] font-medium text-indigo-700">
-                              On proforma
-                            </span>
-                          )}
-                          {article.tax_invoice_id && (
-                            <span className="inline-flex items-center rounded bg-emerald-50 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700">
-                              Tax invoiced
-                            </span>
-                          )}
-                        </div>
-                      </td>
-                      <td className="px-3 py-3 text-slate-600">
-                        {article.vendor_id ? vendorNames.get(article.vendor_id) ?? '—' : '—'}
-                      </td>
-                      <td className="whitespace-nowrap px-3 py-3 text-right tabular-nums text-slate-600">
-                        {formatCurrency(cost)}
-                      </td>
-                      <td className="px-3 py-3 text-right tabular-nums text-slate-600">{quantity}</td>
-                      <td className="whitespace-nowrap px-3 py-3 text-right font-medium tabular-nums text-slate-900">
-                        {formatCurrency(roundMoney(cost * quantity))}
-                      </td>
-                      <td className="px-3 py-3">
-                        <span className={`${badgeClass} ${URGENCY_TONES[urgency] ?? URGENCY_TONES.MEDIUM}`}>
-                          {titleCase(urgency)}
-                        </span>
-                      </td>
-                      <td className="px-3 py-3">
-                        <div className="relative">
-                          <select
-                            value={article.status_code ?? ''}
-                            onChange={(event) => void handleStatusChange(article, event.target.value)}
-                            disabled={statusSavingId === article.id}
-                            aria-label={`Change status for ${displayDescription(article)}`}
-                            className={`w-full min-w-36 cursor-pointer appearance-none rounded-full border-0 py-1 pl-2.5 pr-7 text-xs font-semibold outline-none ring-1 ring-inset focus:ring-2 focus:ring-brand-500 disabled:opacity-60 ${
-                              STATUS_TONES[article.status_code ?? ''] ??
-                              'bg-slate-100 text-slate-600 ring-slate-500/20'
-                            }`}
-                          >
-                            <option value="">Unassigned</option>
-                            {statuses.map((status) => (
-                              <option key={status.status_code} value={status.status_code}>
-                                {status.status_label}
-                              </option>
-                            ))}
-                          </select>
-                          <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-[10px] opacity-70">
-                            ▾
-                          </span>
-                        </div>
-                      </td>
-                      <td className="px-3 py-3">
-                        <div className="flex items-center justify-end gap-1">
-                          <button
-                            type="button"
-                            onClick={() => openEditDialog(article)}
-                            className={rowActionClass}
-                            aria-label={`Edit ${displayDescription(article)}`}
-                          >
-                            <Pencil className="h-3.5 w-3.5" />
-                            Edit
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setDeleteError(null)
-                              setDeleteTarget(article)
-                            }}
-                            className={rowDangerActionClass}
-                            aria-label={`Delete ${displayDescription(article)}`}
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  )
-                })}
+                            {client.clientLabel}
+                          </td>
+                        </tr>
+                        {client.departments.map((department) => (
+                          <Fragment key={department.key}>
+                            <tr className="bg-slate-50">
+                              <td
+                                colSpan={14}
+                                className="px-3 py-1.5 pl-8 text-xs font-medium text-slate-500"
+                              >
+                                {department.departmentLabel}
+                              </td>
+                            </tr>
+                            {department.articles.map((article) => renderArticleRow(article))}
+                          </Fragment>
+                        ))}
+                      </Fragment>
+                    ))
+                  : filteredArticles.map((article) => renderArticleRow(article))}
               </tbody>
             </table>
           </div>
@@ -1393,6 +1578,31 @@ function unitQuantity(article: ArticleRow): number {
   }
 
   return 1
+}
+
+function compareLatestFirst(a: ArticleRow, b: ArticleRow): number {
+  const compare = (left: string | null, right: string | null) => {
+    const aValue = left ?? ''
+    const bValue = right ?? ''
+
+    if (aValue === bValue) {
+      return 0
+    }
+
+    if (!aValue) {
+      return 1
+    }
+
+    if (!bValue) {
+      return -1
+    }
+
+    return aValue < bValue ? 1 : -1
+  }
+
+  return (
+    compare(a.request_date, b.request_date) || compare(a.created_at, b.created_at)
+  )
 }
 
 function normalizeUrgency(value: string | null | undefined): string {

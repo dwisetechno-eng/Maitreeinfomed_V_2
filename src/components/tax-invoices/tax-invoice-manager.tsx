@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Eye, Pencil, RefreshCw, Search, Trash2 } from 'lucide-react'
+import { Eye, Pencil, Plus, RefreshCw, Search, Trash2 } from 'lucide-react'
 
 import {
   SUPABASE_SETUP_MESSAGE,
@@ -24,10 +24,16 @@ import { InboxIcon, PlusIcon, SpinnerIcon } from '@/components/ui/icons'
 import { Modal } from '@/components/ui/modal'
 import { isMissingColumnError, isMissingTableError } from '@/lib/supabase-errors'
 import {
+  PI_GENERATED_STATUS,
+  recalculateTaxInvoicePayment,
+  recalculateTaxInvoiceTotals,
+} from '@/lib/invoice-links'
+import {
   effectiveTaxStatus,
   parseLinkedProformaIds,
   roundMoney,
   toNumber,
+  type ProformaForTaxInvoice,
   type TaxClientOption,
   type TaxInvoiceRow,
   type TaxStatusOption,
@@ -36,13 +42,7 @@ import { createClient } from '@/utils/supabase/client'
 
 type InvoiceWithLinks = TaxInvoiceRow & { tax_invoice_number: string | null }
 
-type LinkedProforma = {
-  id: string
-  pi_number: string | null
-  pi_date: string | null
-  invoice_date: string | null
-  status_code: string | null
-}
+type LinkedProforma = ProformaForTaxInvoice
 
 const STATUS_TONES: Record<string, string> = {
   UNPAID: 'bg-amber-50 text-amber-700 ring-amber-600/20',
@@ -69,8 +69,13 @@ export function TaxInvoiceManager() {
 
   const [viewTarget, setViewTarget] = useState<InvoiceWithLinks | null>(null)
   const [viewProformas, setViewProformas] = useState<LinkedProforma[]>([])
+  const [viewAvailable, setViewAvailable] = useState<LinkedProforma[]>([])
   const [viewLoading, setViewLoading] = useState(false)
   const [viewError, setViewError] = useState<string | null>(null)
+  const [viewPickerOpen, setViewPickerOpen] = useState(false)
+  const [viewSelectedIds, setViewSelectedIds] = useState<Set<string>>(new Set())
+  const [viewSaving, setViewSaving] = useState(false)
+  const [viewActionError, setViewActionError] = useState<string | null>(null)
 
   const [deleteTarget, setDeleteTarget] = useState<InvoiceWithLinks | null>(null)
   const [deleteError, setDeleteError] = useState<string | null>(null)
@@ -220,10 +225,27 @@ export function TaxInvoiceManager() {
     }
   }, [invoices])
 
+  const refreshViewTarget = useCallback(async (invoiceId: string) => {
+    const supabase = createClient()
+    const { data, error } = await supabase
+      .from('tax_invoices')
+      .select('*')
+      .eq('id', invoiceId)
+      .maybeSingle()
+
+    if (!error && data) {
+      setViewTarget(data as InvoiceWithLinks)
+    }
+  }, [])
+
   useEffect(() => {
     if (!viewTarget) {
       setViewProformas([])
+      setViewAvailable([])
       setViewError(null)
+      setViewActionError(null)
+      setViewPickerOpen(false)
+      setViewSelectedIds(new Set())
       return
     }
 
@@ -240,7 +262,7 @@ export function TaxInvoiceManager() {
 
         const { data, error } = await supabase
           .from('proforma_invoices')
-          .select('id, pi_number, pi_date, invoice_date, status_code')
+          .select('*')
           .eq('tax_invoice_id', invoice.id)
           .order('created_at', { ascending: true })
 
@@ -260,7 +282,7 @@ export function TaxInvoiceManager() {
           if (fallbackIds.length > 0) {
             const { data: fallbackRows, error: fallbackError } = await supabase
               .from('proforma_invoices')
-              .select('id, pi_number, pi_date, invoice_date, status_code')
+              .select('*')
               .in('id', fallbackIds)
               .order('created_at', { ascending: true })
 
@@ -272,12 +294,36 @@ export function TaxInvoiceManager() {
           }
         }
 
+        let available: LinkedProforma[] = []
+
+        if (invoice.client_id) {
+          const { data: availableRows, error: availableError } = await supabase
+            .from('proforma_invoices')
+            .select('*')
+            .eq('client_id', invoice.client_id)
+            .is('tax_invoice_id', null)
+            .order('pi_date', { ascending: false, nullsFirst: false })
+            .order('created_at', { ascending: false })
+
+          if (availableError) {
+            if (!isMissingColumnError(availableError)) {
+              throw availableError
+            }
+          } else {
+            available = ((availableRows ?? []) as LinkedProforma[]).filter(
+              (proforma) => (proforma.status_code ?? '').toUpperCase() !== 'CANCELLED'
+            )
+          }
+        }
+
         if (!cancelled) {
           setViewProformas(linked)
+          setViewAvailable(available)
         }
       } catch (error) {
         if (!cancelled) {
           setViewProformas([])
+          setViewAvailable([])
           setViewError(
             getErrorMessage(error, 'Unable to load the proforma invoices for this tax invoice.')
           )
@@ -295,6 +341,158 @@ export function TaxInvoiceManager() {
       cancelled = true
     }
   }, [viewTarget])
+
+  async function handleRemoveProforma(proforma: LinkedProforma) {
+    if (!viewTarget) {
+      return
+    }
+
+    setViewSaving(true)
+    setViewActionError(null)
+
+    try {
+      const supabase = createClient()
+      const remainingIds = viewProformas
+        .filter((row) => row.id !== proforma.id)
+        .map((row) => row.id)
+
+      const { error: unlinkError } = await supabase
+        .from('proforma_invoices')
+        .update({ tax_invoice_id: null, status_code: 'PARTIALLY_BILLED' })
+        .eq('id', proforma.id)
+
+      if (unlinkError && !isMissingColumnError(unlinkError)) {
+        throw unlinkError
+      }
+
+      if (unlinkError && isMissingColumnError(unlinkError)) {
+        const { error: statusError } = await supabase
+          .from('proforma_invoices')
+          .update({ status_code: 'PARTIALLY_BILLED' })
+          .eq('id', proforma.id)
+
+        if (statusError) {
+          throw statusError
+        }
+      }
+
+      const { error: articleError } = await supabase
+        .from('article_requests')
+        .update({ tax_invoice_id: null, status_code: PI_GENERATED_STATUS })
+        .eq('proforma_invoice_id', proforma.id)
+
+      if (articleError && !isMissingColumnError(articleError)) {
+        throw articleError
+      }
+
+      // Legacy invoices only carry the proforma ids inside document_content.
+      const fallbackIds = parseLinkedProformaIds(viewTarget.document_content)
+      if (fallbackIds.length > 0) {
+        const nextContent = rewriteLinkedProformaIds(viewTarget.document_content, remainingIds)
+        if (nextContent !== viewTarget.document_content) {
+          const { error: contentError } = await supabase
+            .from('tax_invoices')
+            .update({ document_content: nextContent })
+            .eq('id', viewTarget.id)
+
+          if (contentError && !isMissingColumnError(contentError)) {
+            throw contentError
+          }
+        }
+      }
+
+      await recalculateTaxInvoiceTotals(supabase, viewTarget.id)
+      await recalculateTaxInvoicePayment(supabase, viewTarget.id)
+      await refreshViewTarget(viewTarget.id)
+      await loadData({ silent: true })
+      setNotice({
+        tone: 'success',
+        message: `${proforma.pi_number ?? 'The proforma invoice'} was removed from this tax invoice. Its articles remain on the proforma invoice.`,
+      })
+    } catch (error) {
+      setViewActionError(
+        getErrorMessage(error, 'Unable to remove the proforma invoice from this tax invoice.')
+      )
+    } finally {
+      setViewSaving(false)
+    }
+  }
+
+  async function handleAddProformas() {
+    if (!viewTarget || viewSelectedIds.size === 0) {
+      return
+    }
+
+    setViewSaving(true)
+    setViewActionError(null)
+
+    try {
+      const supabase = createClient()
+      const ids = Array.from(viewSelectedIds)
+
+      const { error: linkError } = await supabase
+        .from('proforma_invoices')
+        .update({
+          tax_invoice_id: viewTarget.id,
+          status_code: 'TAX_INVOICE_GENERATED',
+        })
+        .in('id', ids)
+
+      if (linkError && !isMissingColumnError(linkError)) {
+        throw linkError
+      }
+
+      if (linkError && isMissingColumnError(linkError)) {
+        const { error: statusError } = await supabase
+          .from('proforma_invoices')
+          .update({ status_code: 'TAX_INVOICE_GENERATED' })
+          .in('id', ids)
+
+        if (statusError) {
+          throw statusError
+        }
+      }
+
+      const { error: articleError } = await supabase
+        .from('article_requests')
+        .update({ tax_invoice_id: viewTarget.id, status_code: PI_GENERATED_STATUS })
+        .in('proforma_invoice_id', ids)
+
+      if (articleError && !isMissingColumnError(articleError)) {
+        throw articleError
+      }
+
+      await recalculateTaxInvoiceTotals(supabase, viewTarget.id)
+      await recalculateTaxInvoicePayment(supabase, viewTarget.id)
+      setViewSelectedIds(new Set())
+      setViewPickerOpen(false)
+      await refreshViewTarget(viewTarget.id)
+      await loadData({ silent: true })
+      setNotice({
+        tone: 'success',
+        message: `${ids.length} proforma invoice${ids.length === 1 ? '' : 's'} added to this tax invoice.`,
+      })
+    } catch (error) {
+      setViewActionError(
+        getErrorMessage(error, 'Unable to add the selected proforma invoices to this tax invoice.')
+      )
+    } finally {
+      setViewSaving(false)
+    }
+  }
+
+  function toggleViewSelection(proformaId: string) {
+    setViewSelectedIds((current) => {
+      const next = new Set(current)
+      if (next.has(proformaId)) {
+        next.delete(proformaId)
+      } else {
+        next.add(proformaId)
+      }
+      return next
+    })
+    setViewActionError(null)
+  }
 
   function openCreateDialog() {
     setDialogInvoice(null)
@@ -771,16 +969,41 @@ export function TaxInvoiceManager() {
             </div>
 
             <div className="overflow-hidden rounded-xl border border-slate-200">
-              <div className="border-b border-slate-200 bg-slate-50 px-4 py-2.5">
-                <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                  Proforma invoices
-                </h3>
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-slate-50 px-4 py-2.5">
+                <div>
+                  <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    Proforma invoices ({viewProformas.length})
+                  </h3>
+                  <p className="mt-0.5 text-xs text-slate-500">
+                    Remove a proforma invoice to send it back to the partially billed queue, or add
+                    another open proforma invoice for the same client.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setViewPickerOpen((open) => !open)
+                    setViewActionError(null)
+                  }}
+                  className={`${secondaryButtonClass} px-2.5 py-1.5 text-xs`}
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  {viewPickerOpen ? 'Close picker' : 'Add proformas'}
+                </button>
               </div>
 
               {viewError && (
                 <div className="px-4 py-3">
                   <Alert tone="error" onDismiss={() => setViewError(null)}>
                     {viewError}
+                  </Alert>
+                </div>
+              )}
+
+              {viewActionError && (
+                <div className="px-4 py-3">
+                  <Alert tone="error" onDismiss={() => setViewActionError(null)}>
+                    {viewActionError}
                   </Alert>
                 </div>
               )}
@@ -810,6 +1033,12 @@ export function TaxInvoiceManager() {
                         <th scope="col" className="px-4 py-2.5">
                           Status
                         </th>
+                        <th scope="col" className="px-4 py-2.5 text-right">
+                          Total
+                        </th>
+                        <th scope="col" className="px-4 py-2.5 text-right">
+                          <span className="sr-only">Actions</span>
+                        </th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
@@ -824,10 +1053,111 @@ export function TaxInvoiceManager() {
                           <td className="px-4 py-2.5 text-slate-600">
                             {proforma.status_code ?? '—'}
                           </td>
+                          <td className="px-4 py-2.5 text-right tabular-nums text-slate-900">
+                            {formatCurrency(proforma.grand_total)}
+                          </td>
+                          <td className="px-4 py-2.5 text-right">
+                            <button
+                              type="button"
+                              onClick={() => void handleRemoveProforma(proforma)}
+                              disabled={viewSaving}
+                              className={rowDangerActionClass}
+                              aria-label={`Remove ${proforma.pi_number ?? 'proforma invoice'} from this tax invoice`}
+                            >
+                              {viewSaving ? (
+                                <SpinnerIcon className="h-3.5 w-3.5" />
+                              ) : (
+                                <Trash2 className="h-3.5 w-3.5" />
+                              )}
+                              Remove
+                            </button>
+                          </td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
+                </div>
+              )}
+
+              {viewPickerOpen && (
+                <div className="border-t border-slate-200 bg-slate-50/60 px-4 py-3">
+                  {viewAvailable.length === 0 ? (
+                    <p className="text-sm text-slate-500">
+                      There are no open proforma invoices for this client to add.
+                    </p>
+                  ) : (
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                          Available proforma invoices ({viewAvailable.length})
+                        </p>
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setViewSelectedIds(
+                                new Set(viewAvailable.map((proforma) => proforma.id))
+                              )
+                            }
+                            className="text-xs font-medium text-brand-700 hover:underline"
+                          >
+                            Select all
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setViewSelectedIds(new Set())}
+                            className="text-xs font-medium text-slate-500 hover:underline"
+                          >
+                            Clear
+                          </button>
+                        </div>
+                      </div>
+
+                      <ul className="max-h-64 divide-y divide-slate-200 overflow-y-auto rounded-lg border border-slate-200 bg-white">
+                        {viewAvailable.map((proforma) => (
+                          <li key={proforma.id}>
+                            <label className="flex cursor-pointer items-start gap-3 px-3 py-2 hover:bg-slate-50">
+                              <input
+                                type="checkbox"
+                                checked={viewSelectedIds.has(proforma.id)}
+                                onChange={() => toggleViewSelection(proforma.id)}
+                                className="mt-0.5 h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+                              />
+                              <span className="min-w-0 flex-1">
+                                <span className="block truncate font-mono text-xs font-medium text-slate-900">
+                                  {proforma.pi_number?.trim() ||
+                                    proforma.id.slice(0, 8).toUpperCase()}
+                                </span>
+                                <span className="mt-0.5 block text-xs text-slate-500">
+                                  {formatDate(proforma.pi_date ?? proforma.invoice_date)} ·{' '}
+                                  {formatCurrency(proforma.grand_total)}
+                                </span>
+                              </span>
+                            </label>
+                          </li>
+                        ))}
+                      </ul>
+
+                      <div className="flex items-center justify-end gap-2">
+                        <span className="mr-auto text-xs text-slate-500">
+                          {viewSelectedIds.size} selected
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => void handleAddProformas()}
+                          disabled={viewSaving || viewSelectedIds.size === 0}
+                          className={`${primaryButtonClass} px-3 py-1.5 text-xs`}
+                        >
+                          {viewSaving ? (
+                            <SpinnerIcon className="h-3.5 w-3.5" />
+                          ) : (
+                            <Plus className="h-3.5 w-3.5" />
+                          )}
+                          Add to invoice
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -851,6 +1181,27 @@ export function TaxInvoiceManager() {
       />
     </div>
   )
+}
+
+function rewriteLinkedProformaIds(
+  documentContent: string | null | undefined,
+  ids: string[]
+): string | null {
+  if (!documentContent) {
+    return documentContent ?? null
+  }
+
+  try {
+    const parsed = JSON.parse(documentContent) as Record<string, unknown>
+
+    if (parsed.source !== 'PROFORMA') {
+      return documentContent
+    }
+
+    return JSON.stringify({ ...parsed, proforma_invoice_ids: ids })
+  } catch {
+    return documentContent
+  }
 }
 
 function Detail({

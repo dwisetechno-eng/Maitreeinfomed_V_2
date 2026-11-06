@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Coins, RefreshCw, Wand2 } from 'lucide-react'
+import { Coins, RefreshCw, Trash2, Wand2 } from 'lucide-react'
 
 import {
   SUPABASE_SETUP_MESSAGE,
@@ -12,12 +12,14 @@ import {
   inputClass,
   primaryButtonClass,
   roundMoney,
+  rowDangerActionClass,
   secondaryButtonClass,
 } from '@/components/masters/utils'
 import { Alert } from '@/components/ui/alert'
 import { Modal } from '@/components/ui/modal'
 import { SpinnerIcon } from '@/components/ui/icons'
 import { isMissingColumnError, isMissingTableError } from '@/lib/supabase-errors'
+import { recalculateTaxInvoicePayment } from '@/lib/invoice-links'
 import { createClient } from '@/utils/supabase/client'
 
 export type ReceiptForAllocation = {
@@ -54,11 +56,18 @@ type Props = {
   onClose: () => void
   receipt: ReceiptForAllocation | null
   onAllocated: (message: string) => void | Promise<void>
+  onChanged?: (message: string) => void | Promise<void>
 }
 
 const EPSILON = 0.005
 
-export function AllocatePaymentDialog({ open, onClose, receipt, onAllocated }: Props) {
+export function AllocatePaymentDialog({
+  open,
+  onClose,
+  receipt,
+  onAllocated,
+  onChanged,
+}: Props) {
   const [invoices, setInvoices] = useState<TaxInvoiceRow[]>([])
   const [allocations, setAllocations] = useState<AllocationRow[]>([])
   const [allocationsAvailable, setAllocationsAvailable] = useState(true)
@@ -69,6 +78,7 @@ export function AllocatePaymentDialog({ open, onClose, receipt, onAllocated }: P
   const [draft, setDraft] = useState<Record<string, string>>({})
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
+  const [removingId, setRemovingId] = useState<string | null>(null)
 
   useEffect(() => {
     if (!open) {
@@ -179,6 +189,19 @@ export function AllocatePaymentDialog({ open, onClose, receipt, onAllocated }: P
         .reduce((total, allocation) => total + toNumber(allocation.amount), 0)
     )
   }, [allocations, receipt])
+
+  const receiptAllocations = useMemo(() => {
+    if (!receipt) {
+      return []
+    }
+
+    return allocations
+      .filter((allocation) => allocation.receipt_id === receipt.id)
+      .map((allocation) => ({
+        allocation,
+        invoice: invoices.find((invoice) => invoice.id === allocation.tax_invoice_id) ?? null,
+      }))
+  }, [allocations, invoices, receipt])
 
   const receiptTotal = toNumber(receipt?.amount_received)
   const receiptRemaining = roundMoney(Math.max(0, receiptTotal - appliedToReceipt))
@@ -372,6 +395,49 @@ export function AllocatePaymentDialog({ open, onClose, receipt, onAllocated }: P
     }
   }
 
+  async function handleRemoveAllocation(allocation: AllocationRow) {
+    if (!receipt) {
+      return
+    }
+
+    if (!hasSupabaseEnv()) {
+      setSaveError(SUPABASE_SETUP_MESSAGE)
+      return
+    }
+
+    setRemovingId(allocation.id)
+    setSaveError(null)
+
+    try {
+      const supabase = createClient()
+
+      const { error } = await supabase
+        .from('payment_allocations')
+        .delete()
+        .eq('id', allocation.id)
+
+      if (error) {
+        throw error
+      }
+
+      await recalculateTaxInvoicePayment(supabase, allocation.tax_invoice_id)
+      const invoice = invoices.find((row) => row.id === allocation.tax_invoice_id)
+      const label = invoice ? invoiceLabel(invoice) : 'the tax invoice'
+
+      setRefreshKey((value) => value + 1)
+
+      if (onChanged) {
+        await onChanged(
+          `${formatCurrency(toNumber(allocation.amount))} was removed from ${label}.`
+        )
+      }
+    } catch (error) {
+      setSaveError(getErrorMessage(error, 'Unable to remove the allocation.'))
+    } finally {
+      setRemovingId(null)
+    }
+  }
+
   return (
     <Modal
       open={open}
@@ -467,6 +533,59 @@ export function AllocatePaymentDialog({ open, onClose, receipt, onAllocated }: P
             </button>
           </div>
         </div>
+
+        {receiptAllocations.length > 0 && (
+          <div className="overflow-hidden rounded-xl border border-slate-200">
+            <div className="flex items-center justify-between gap-2 border-b border-slate-200 bg-slate-50 px-4 py-2.5">
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                Allocated from this receipt
+              </h3>
+              <span className="text-xs font-medium tabular-nums text-slate-700">
+                {formatCurrency(appliedToReceipt)}
+              </span>
+            </div>
+            <ul className="divide-y divide-slate-100 bg-white">
+              {receiptAllocations.map(({ allocation, invoice }) => (
+                <li
+                  key={allocation.id}
+                  className="flex flex-wrap items-center gap-3 px-4 py-2.5"
+                >
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate font-mono text-xs font-medium text-slate-700">
+                      {invoice
+                        ? invoiceLabel(invoice)
+                        : allocation.tax_invoice_id.slice(0, 8).toUpperCase()}
+                    </p>
+                    <p className="mt-0.5 text-xs text-slate-500">
+                      {invoice
+                        ? formatDate(invoice.invoice_date ?? invoice.created_at)
+                        : 'Tax invoice'}
+                    </p>
+                  </div>
+                  <span className="text-sm font-medium tabular-nums text-slate-900">
+                    {formatCurrency(toNumber(allocation.amount))}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => void handleRemoveAllocation(allocation)}
+                    disabled={saving || removingId !== null}
+                    className={rowDangerActionClass}
+                    aria-label={`Remove allocation to ${
+                      invoice ? invoiceLabel(invoice) : 'tax invoice'
+                    }`}
+                  >
+                    {removingId === allocation.id ? (
+                      <SpinnerIcon className="h-3.5 w-3.5" />
+                    ) : (
+                      <Trash2 className="h-3.5 w-3.5" />
+                    )}
+                    Remove
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
 
         {loading ? (
           <div className="space-y-2" aria-hidden="true">

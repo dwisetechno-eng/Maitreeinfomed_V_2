@@ -38,6 +38,7 @@ import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { Modal } from '@/components/ui/modal'
 import { SpinnerIcon } from '@/components/ui/icons'
 import { isMissingTableError } from '@/lib/supabase-errors'
+import { recalculateTaxInvoicePayment } from '@/lib/invoice-links'
 import { createClient } from '@/utils/supabase/client'
 
 type ClientRow = { id: string; company_name: string }
@@ -396,8 +397,25 @@ export function PaymentReceiptManager() {
     try {
       const supabase = createClient()
 
-      // Remove allocations first so the receipt can be deleted cleanly.
+      // Collect the affected invoices before deleting so their paid totals can
+      // be recomputed afterwards.
+      let affectedInvoiceIds: string[] = []
+
       if (allocationsAvailable) {
+        const { data: allocationRows } = await supabase
+          .from('payment_allocations')
+          .select('tax_invoice_id')
+          .eq('receipt_id', deleteTarget.id)
+
+        affectedInvoiceIds = Array.from(
+          new Set(
+            ((allocationRows ?? []) as Array<{ tax_invoice_id: string | null }>)
+              .map((row) => row.tax_invoice_id)
+              .filter((id): id is string => Boolean(id))
+          )
+        )
+
+        // Remove allocations first so the receipt can be deleted cleanly.
         const { error: allocationError } = await supabase
           .from('payment_allocations')
           .delete()
@@ -415,6 +433,14 @@ export function PaymentReceiptManager() {
 
       if (error) {
         throw error
+      }
+
+      for (const invoiceId of affectedInvoiceIds) {
+        try {
+          await recalculateTaxInvoicePayment(supabase, invoiceId)
+        } catch {
+          // Best effort: the receipt is already gone.
+        }
       }
 
       setNotice({ tone: 'success', message: `Receipt ${deleteTarget.receipt_number} was deleted.` })
@@ -890,12 +916,16 @@ export function PaymentReceiptManager() {
           setNotice({ tone: 'success', message })
           await loadData({ silent: true })
         }}
+        onChanged={async (message) => {
+          setNotice({ tone: 'success', message })
+          await loadData({ silent: true })
+        }}
       />
 
       <ConfirmDialog
         open={deleteTarget !== null}
         title={`Delete ${deleteTarget?.receipt_number ?? 'receipt'}?`}
-        message="This permanently removes the receipt and any allocations recorded against it. Tax invoice balances are not recalculated automatically."
+        message="This permanently removes the receipt and any allocations recorded against it. Each affected tax invoice is recalculated back to unpaid or partially paid."
         busy={deleting}
         error={deleteError}
         onCancel={() => {

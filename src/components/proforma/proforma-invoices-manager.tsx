@@ -32,6 +32,18 @@ import { Alert } from '@/components/ui/alert'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { InboxIcon, PlusIcon, RefreshIcon, SpinnerIcon } from '@/components/ui/icons'
 import { Modal } from '@/components/ui/modal'
+import {
+  getArticleQuantity,
+  getArticleRate,
+  getArticleTitle,
+  type ArticleRequestRow,
+} from '@/lib/article-request-meta'
+import {
+  articleLinkAmount,
+  fetchPendingArticleStatus,
+  PI_GENERATED_STATUS,
+  recalculateProformaTotals,
+} from '@/lib/invoice-links'
 import { extractMissingColumn, roundMoney } from '@/lib/proforma-invoices'
 import { isMissingColumnError } from '@/lib/supabase-errors'
 import { createClient } from '@/utils/supabase/client'
@@ -50,20 +62,11 @@ type ProformaInvoiceRow = {
   tax_amount?: number | null
   grand_total: number | null
   invoice_date: string | null
+  tax_invoice_id?: string | null
   created_at: string | null
 }
 
-type LinkedArticle = {
-  id: string
-  article_description: string | null
-  article_title?: string | null
-  notes: string | null
-  cost_price: number | null
-  rate?: number | null
-  quantity: number | null
-  status_code: string | null
-  created_at: string | null
-}
+type LinkedArticle = ArticleRequestRow
 
 type EditForm = {
   pi_number: string
@@ -106,8 +109,13 @@ export function ProformaInvoicesManager() {
 
   const [viewTarget, setViewTarget] = useState<ProformaInvoiceRow | null>(null)
   const [viewArticles, setViewArticles] = useState<LinkedArticle[]>([])
+  const [viewAvailable, setViewAvailable] = useState<LinkedArticle[]>([])
   const [viewLoading, setViewLoading] = useState(false)
   const [viewError, setViewError] = useState<string | null>(null)
+  const [viewPickerOpen, setViewPickerOpen] = useState(false)
+  const [viewSelectedIds, setViewSelectedIds] = useState<Set<string>>(new Set())
+  const [viewSaving, setViewSaving] = useState(false)
+  const [viewActionError, setViewActionError] = useState<string | null>(null)
 
   const [editTarget, setEditTarget] = useState<ProformaInvoiceRow | null>(null)
   const [editForm, setEditForm] = useState<EditForm>(EMPTY_EDIT_FORM)
@@ -234,42 +242,82 @@ export function ProformaInvoicesManager() {
     return { total, monthCount: monthInvoices.length, monthTotal }
   }, [invoices])
 
+  const viewLocked = Boolean(viewTarget?.tax_invoice_id)
+
+  const refreshViewTarget = useCallback(async (invoiceId: string) => {
+    const supabase = createClient()
+    const { data, error } = await supabase
+      .from('proforma_invoices')
+      .select('*')
+      .eq('id', invoiceId)
+      .maybeSingle()
+
+    if (!error && data) {
+      setViewTarget(data as ProformaInvoiceRow)
+    }
+  }, [])
+
   useEffect(() => {
     if (!viewTarget) {
       setViewArticles([])
+      setViewAvailable([])
       setViewError(null)
+      setViewActionError(null)
+      setViewPickerOpen(false)
+      setViewSelectedIds(new Set())
       return
     }
 
     let cancelled = false
+    const invoice = viewTarget
 
-    async function loadLinkedArticles() {
+    async function loadViewData() {
       setViewLoading(true)
       setViewError(null)
 
       try {
         const supabase = createClient()
-        const { data, error } = await supabase
+        const linkedResult = await supabase
           .from('article_requests')
-          .select(
-            'id, article_description, article_title, notes, cost_price, rate, quantity, status_code, created_at'
-          )
-          .eq('proforma_invoice_id', viewTarget!.id)
+          .select('*')
+          .eq('proforma_invoice_id', invoice.id)
           .order('created_at', { ascending: true })
 
-        if (cancelled) {
-          return
+        if (linkedResult.error) {
+          throw linkedResult.error
         }
 
-        if (error) {
-          throw error
+        let available: LinkedArticle[] = []
+
+        // Requests that are not on any invoice for the same client can be
+        // pulled into this proforma. A billed proforma is locked, so we skip
+        // the query entirely.
+        if (invoice.client_id && !invoice.tax_invoice_id) {
+          const availableResult = await supabase
+            .from('article_requests')
+            .select('*')
+            .is('proforma_invoice_id', null)
+            .is('tax_invoice_id', null)
+            .eq('client_id', invoice.client_id)
+            .order('request_date', { ascending: false, nullsFirst: false })
+            .order('created_at', { ascending: false })
+
+          if (availableResult.error) {
+            throw availableResult.error
+          }
+
+          available = (availableResult.data ?? []) as LinkedArticle[]
         }
 
-        setViewArticles((data ?? []) as LinkedArticle[])
+        if (!cancelled) {
+          setViewArticles((linkedResult.data ?? []) as LinkedArticle[])
+          setViewAvailable(available)
+        }
       } catch (error) {
         if (!cancelled) {
           setViewArticles([])
-          setViewError(getErrorMessage(error, 'Unable to load the linked article requests.'))
+          setViewAvailable([])
+          setViewError(getErrorMessage(error, 'Unable to load the article requests for this invoice.'))
         }
       } finally {
         if (!cancelled) {
@@ -278,12 +326,115 @@ export function ProformaInvoicesManager() {
       }
     }
 
-    void loadLinkedArticles()
+    void loadViewData()
 
     return () => {
       cancelled = true
     }
   }, [viewTarget])
+
+  async function handleRemoveArticle(article: LinkedArticle) {
+    if (!viewTarget) {
+      return
+    }
+
+    if (viewLocked) {
+      setViewActionError(
+        'This proforma invoice has already been converted to a tax invoice, so its articles cannot be changed.'
+      )
+      return
+    }
+
+    setViewSaving(true)
+    setViewActionError(null)
+
+    try {
+      const supabase = createClient()
+      const pendingStatus = await fetchPendingArticleStatus(supabase)
+
+      const { error } = await supabase
+        .from('article_requests')
+        .update({
+          proforma_invoice_id: null,
+          tax_invoice_id: null,
+          status_code: pendingStatus,
+        })
+        .eq('id', article.id)
+
+      if (error) {
+        throw error
+      }
+
+      await recalculateProformaTotals(supabase, viewTarget.id)
+      await refreshViewTarget(viewTarget.id)
+      await loadData({ silent: true })
+    } catch (error) {
+      setViewActionError(
+        getErrorMessage(error, 'Unable to remove the article request from this invoice.')
+      )
+    } finally {
+      setViewSaving(false)
+    }
+  }
+
+  async function handleAddArticles() {
+    if (!viewTarget || viewSelectedIds.size === 0) {
+      return
+    }
+
+    if (viewLocked) {
+      setViewActionError(
+        'This proforma invoice has already been converted to a tax invoice, so its articles cannot be changed.'
+      )
+      return
+    }
+
+    setViewSaving(true)
+    setViewActionError(null)
+
+    try {
+      const supabase = createClient()
+      const ids = Array.from(viewSelectedIds)
+
+      const { error } = await supabase
+        .from('article_requests')
+        .update({
+          proforma_invoice_id: viewTarget.id,
+          status_code: PI_GENERATED_STATUS,
+        })
+        .in('id', ids)
+        .is('proforma_invoice_id', null)
+
+      if (error) {
+        throw error
+      }
+
+      await recalculateProformaTotals(supabase, viewTarget.id)
+      setViewSelectedIds(new Set())
+      setViewPickerOpen(false)
+      await refreshViewTarget(viewTarget.id)
+      await loadData({ silent: true })
+    } catch (error) {
+      setViewActionError(
+        getErrorMessage(error, 'Unable to add the selected article requests to this invoice.')
+      )
+    } finally {
+      setViewSaving(false)
+    }
+  }
+
+  function toggleViewSelection(articleId: string) {
+    setViewSelectedIds((current) => {
+      const next = new Set(current)
+      if (next.has(articleId)) {
+        next.delete(articleId)
+      } else {
+        next.add(articleId)
+      }
+      return next
+    })
+    setViewActionError(null)
+  }
 
   function openEditDialog(row: ProformaInvoiceRow) {
     setEditForm({
@@ -313,6 +464,13 @@ export function ProformaInvoicesManager() {
     event.preventDefault()
 
     if (!editTarget) {
+      return
+    }
+
+    if (editTarget.tax_invoice_id) {
+      setEditError(
+        'This proforma invoice has already been converted to a tax invoice and can no longer be edited.'
+      )
       return
     }
 
@@ -383,6 +541,13 @@ export function ProformaInvoicesManager() {
       return
     }
 
+    if (deleteTarget.tax_invoice_id) {
+      setDeleteError(
+        'This proforma invoice has been converted to a tax invoice. Remove it from the tax invoice first.'
+      )
+      return
+    }
+
     if (!hasSupabaseEnv()) {
       setDeleteError(SUPABASE_SETUP_MESSAGE)
       return
@@ -429,6 +594,7 @@ export function ProformaInvoicesManager() {
           .from('article_requests')
           .update({
             proforma_invoice_id: null,
+            tax_invoice_id: null,
             status_code: pendingStatus,
           })
           .eq('proforma_invoice_id', invoiceId)
@@ -754,6 +920,12 @@ export function ProformaInvoicesManager() {
                           onClick={() => openEditDialog(invoice)}
                           className={rowActionClass}
                           aria-label={`Edit ${invoice.pi_number ?? 'invoice'}`}
+                          disabled={Boolean(invoice.tax_invoice_id)}
+                          title={
+                            invoice.tax_invoice_id
+                              ? 'This proforma invoice has been converted to a tax invoice'
+                              : undefined
+                          }
                         >
                           <Pencil className="h-3.5 w-3.5" />
                           Edit
@@ -766,6 +938,12 @@ export function ProformaInvoicesManager() {
                           }}
                           className={rowDangerActionClass}
                           aria-label={`Delete ${invoice.pi_number ?? 'invoice'}`}
+                          disabled={Boolean(invoice.tax_invoice_id)}
+                          title={
+                            invoice.tax_invoice_id
+                              ? 'Remove this proforma invoice from its tax invoice first'
+                              : undefined
+                          }
                         >
                           <Trash2 className="h-3.5 w-3.5" />
                         </button>
@@ -835,16 +1013,50 @@ export function ProformaInvoicesManager() {
             </dl>
 
             <div className="overflow-hidden rounded-xl border border-slate-200">
-              <div className="border-b border-slate-200 bg-slate-50 px-4 py-2.5">
-                <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                  Linked article requests
-                </h3>
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-slate-50 px-4 py-2.5">
+                <div>
+                  <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    Linked article requests ({viewArticles.length})
+                  </h3>
+                  <p className="mt-0.5 text-xs text-slate-500">
+                    Remove a request to send it back to the pending queue, or pull in more requests
+                    from the same client.
+                  </p>
+                </div>
+                {!viewLocked && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setViewPickerOpen((open) => !open)
+                      setViewActionError(null)
+                    }}
+                    className={`${secondaryButtonClass} px-2.5 py-1.5 text-xs`}
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    {viewPickerOpen ? 'Close picker' : 'Add articles'}
+                  </button>
+                )}
               </div>
+
+              {viewLocked && (
+                <div className="border-b border-amber-200 bg-amber-50 px-4 py-2.5 text-xs text-amber-800">
+                  This proforma invoice has been converted to a tax invoice. Remove or add the
+                  linked tax invoice first to edit these articles.
+                </div>
+              )}
 
               {viewError && (
                 <div className="px-4 py-3">
                   <Alert tone="error" onDismiss={() => setViewError(null)}>
                     {viewError}
+                  </Alert>
+                </div>
+              )}
+
+              {viewActionError && (
+                <div className="px-4 py-3">
+                  <Alert tone="error" onDismiss={() => setViewActionError(null)}>
+                    {viewActionError}
                   </Alert>
                 </div>
               )}
@@ -876,40 +1088,137 @@ export function ProformaInvoicesManager() {
                         <th scope="col" className="px-4 py-2.5 text-right">
                           Amount
                         </th>
+                        <th scope="col" className="px-4 py-2.5 text-right">
+                          <span className="sr-only">Actions</span>
+                        </th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
-                      {viewArticles.map((article) => {
-                        const rate = toNumber(article.cost_price ?? article.rate)
-                        const quantity =
-                          typeof article.quantity === 'number' && article.quantity > 0
-                            ? article.quantity
-                            : 1
-
-                        return (
-                          <tr key={article.id}>
-                            <td className="max-w-[24rem] px-4 py-2.5">
-                              <p className="truncate text-slate-900">
-                                {article.article_title?.trim() ||
-                                  article.article_description?.trim() ||
-                                  article.notes ||
-                                  `Article request ${article.id.slice(0, 8)}`}
-                              </p>
-                            </td>
-                            <td className="px-4 py-2.5 text-right tabular-nums text-slate-600">
-                              {quantity}
-                            </td>
-                            <td className="px-4 py-2.5 text-right tabular-nums text-slate-600">
-                              {formatCurrency(rate)}
-                            </td>
-                            <td className="px-4 py-2.5 text-right font-medium tabular-nums text-slate-900">
-                              {formatCurrency(roundMoney(rate * quantity))}
-                            </td>
-                          </tr>
-                        )
-                      })}
+                      {viewArticles.map((article) => (
+                        <tr key={article.id}>
+                          <td className="max-w-[24rem] px-4 py-2.5">
+                            <p className="truncate text-slate-900">{getArticleTitle(article)}</p>
+                          </td>
+                          <td className="px-4 py-2.5 text-right tabular-nums text-slate-600">
+                            {getArticleQuantity(article)}
+                          </td>
+                          <td className="px-4 py-2.5 text-right tabular-nums text-slate-600">
+                            {formatCurrency(getArticleRate(article))}
+                          </td>
+                          <td className="px-4 py-2.5 text-right font-medium tabular-nums text-slate-900">
+                            {formatCurrency(articleLinkAmount(article))}
+                          </td>
+                          <td className="px-4 py-2.5 text-right">
+                            <button
+                              type="button"
+                              onClick={() => void handleRemoveArticle(article)}
+                              disabled={viewSaving || viewLocked}
+                              className={rowDangerActionClass}
+                              aria-label={`Remove ${getArticleTitle(article)} from this invoice`}
+                              title={
+                                viewLocked
+                                  ? 'Converted proforma invoices cannot be edited'
+                                  : 'Remove from this invoice'
+                              }
+                            >
+                              {viewSaving ? (
+                                <SpinnerIcon className="h-3.5 w-3.5" />
+                              ) : (
+                                <Trash2 className="h-3.5 w-3.5" />
+                              )}
+                              Remove
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
                     </tbody>
                   </table>
+                </div>
+              )}
+
+              {viewPickerOpen && !viewLocked && (
+                <div className="border-t border-slate-200 bg-slate-50/60 px-4 py-3">
+                  {viewAvailable.length === 0 ? (
+                    <p className="text-sm text-slate-500">
+                      There are no unlinked article requests for this client to add.
+                    </p>
+                  ) : (
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                          Available requests ({viewAvailable.length})
+                        </p>
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setViewSelectedIds(
+                                new Set(viewAvailable.map((article) => article.id))
+                              )
+                            }
+                            className="text-xs font-medium text-brand-700 hover:underline"
+                          >
+                            Select all
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setViewSelectedIds(new Set())}
+                            className="text-xs font-medium text-slate-500 hover:underline"
+                          >
+                            Clear
+                          </button>
+                        </div>
+                      </div>
+
+                      <ul className="max-h-64 divide-y divide-slate-200 overflow-y-auto rounded-lg border border-slate-200 bg-white">
+                        {viewAvailable.map((article) => {
+                          const checked = viewSelectedIds.has(article.id)
+                          return (
+                            <li key={article.id}>
+                              <label className="flex cursor-pointer items-start gap-3 px-3 py-2 hover:bg-slate-50">
+                                <input
+                                  type="checkbox"
+                                  checked={checked}
+                                  onChange={() => toggleViewSelection(article.id)}
+                                  className="mt-0.5 h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+                                />
+                                <span className="min-w-0 flex-1">
+                                  <span className="block truncate text-sm text-slate-900">
+                                    {getArticleTitle(article)}
+                                  </span>
+                                  <span className="mt-0.5 block text-xs text-slate-500">
+                                    {formatDate(article.request_date)} ·{' '}
+                                    {getArticleQuantity(article)} ×{' '}
+                                    {formatCurrency(getArticleRate(article))} ={' '}
+                                    {formatCurrency(articleLinkAmount(article))}
+                                  </span>
+                                </span>
+                              </label>
+                            </li>
+                          )
+                        })}
+                      </ul>
+
+                      <div className="flex items-center justify-end gap-2">
+                        <span className="mr-auto text-xs text-slate-500">
+                          {viewSelectedIds.size} selected
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => void handleAddArticles()}
+                          disabled={viewSaving || viewSelectedIds.size === 0}
+                          className={`${primaryButtonClass} px-3 py-1.5 text-xs`}
+                        >
+                          {viewSaving ? (
+                            <SpinnerIcon className="h-3.5 w-3.5" />
+                          ) : (
+                            <Plus className="h-3.5 w-3.5" />
+                          )}
+                          Add to invoice
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
