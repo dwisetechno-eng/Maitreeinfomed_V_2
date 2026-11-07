@@ -3,6 +3,7 @@
 import type { FormEvent } from 'react'
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
 import {
+  Download,
   FileText,
   Layers,
   Pencil,
@@ -15,6 +16,7 @@ import {
 } from 'lucide-react'
 
 import type { ImportResult } from '@/actions/import-articles'
+import { exportArticles } from '@/actions/import-articles'
 import { AssignProformaDialog } from '@/components/article-requests/assign-proforma-dialog'
 import { BatchImportDialog } from '@/components/article-requests/batch-import-dialog'
 import { BatchManageDialog } from '@/components/article-requests/batch-manage-dialog'
@@ -187,6 +189,7 @@ export function ArticleRequestManager() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [assignOpen, setAssignOpen] = useState(false)
   const [importOpen, setImportOpen] = useState(false)
+  const [exporting, setExporting] = useState(false)
   const [batchManageOpen, setBatchManageOpen] = useState(false)
   const [statusSavingId, setStatusSavingId] = useState<string | null>(null)
 
@@ -592,6 +595,59 @@ export function ArticleRequestManager() {
     })
     setFormError(null)
     setDialog({ mode: 'create' })
+  }
+
+  async function handleExport() {
+    if (filteredArticles.length === 0) {
+      return
+    }
+
+    setExporting(true)
+
+    try {
+      const result = await exportArticles(filteredArticles.map((article) => article.id))
+
+      if (!result.ok) {
+        setNotice({ tone: 'error', message: result.error })
+        return
+      }
+
+      downloadBase64(result.base64, result.filename)
+      setNotice({
+        tone: 'success',
+        message: `Exported ${filteredArticles.length} article request${
+          filteredArticles.length === 1 ? '' : 's'
+        }.`,
+      })
+    } catch (exportError) {
+      setNotice({
+        tone: 'error',
+        message: getErrorMessage(exportError, 'Could not export the article requests.'),
+      })
+    } finally {
+      setExporting(false)
+    }
+  }
+
+  function downloadBase64(base64: string, filename: string) {
+    const binary = atob(base64)
+    const bytes = new Uint8Array(binary.length)
+
+    for (let index = 0; index < binary.length; index += 1) {
+      bytes[index] = binary.charCodeAt(index)
+    }
+
+    const blob = new Blob([bytes], {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    })
+    const url = URL.createObjectURL(blob)
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = filename
+    document.body.appendChild(anchor)
+    anchor.click()
+    document.body.removeChild(anchor)
+    URL.revokeObjectURL(url)
   }
 
   function openEditDialog(row: ArticleRow) {
@@ -1005,6 +1061,12 @@ export function ArticleRequestManager() {
             label="Import article batch"
             icon={<Upload />}
             onClick={() => setImportOpen(true)}
+          />
+          <IconButton
+            label={exporting ? 'Exporting…' : 'Export filtered list'}
+            icon={exporting ? <SpinnerIcon /> : <Download />}
+            onClick={() => void handleExport()}
+            disabled={exporting || filteredArticles.length === 0}
           />
           <IconButton
             label="New article request"

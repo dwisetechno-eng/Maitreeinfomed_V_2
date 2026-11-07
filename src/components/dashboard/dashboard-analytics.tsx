@@ -39,13 +39,20 @@ export function DashboardAnalytics() {
   const [error, setError] = useState<string | null>(null)
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null)
 
-  const loadData = useCallback(async () => {
-    setLoading(true)
+  const loadData = useCallback(async (options?: { silent?: boolean }) => {
+    const silent = options?.silent === true
+
+    if (!silent) {
+      setLoading(true)
+    }
+
     setError(null)
 
     if (!hasSupabaseEnv()) {
       setError(SUPABASE_SETUP_MESSAGE)
-      setLoading(false)
+      if (!silent) {
+        setLoading(false)
+      }
       return
     }
 
@@ -98,12 +105,34 @@ export function DashboardAnalytics() {
     } catch (loadError) {
       setError(getErrorMessage(loadError, 'Unable to load dashboard analytics.'))
     } finally {
-      setLoading(false)
+      if (!silent) {
+        setLoading(false)
+      }
     }
   }, [])
 
   useEffect(() => {
     void loadData()
+  }, [loadData])
+
+  // Re-fetch quietly when the window regains focus or the tab becomes visible
+  // again, so reversals made on another route show up without a manual refresh.
+  useEffect(() => {
+    function refreshIfVisible() {
+      if (document.visibilityState !== 'visible') {
+        return
+      }
+
+      void loadData({ silent: true })
+    }
+
+    window.addEventListener('focus', refreshIfVisible)
+    document.addEventListener('visibilitychange', refreshIfVisible)
+
+    return () => {
+      window.removeEventListener('focus', refreshIfVisible)
+      document.removeEventListener('visibilitychange', refreshIfVisible)
+    }
   }, [loadData])
 
   const kpis = useMemo(() => {

@@ -634,6 +634,302 @@ async function removeVendors(
   }
 }
 
+/**
+ * Build a sample .xlsx that documents the expected import columns and can be
+ * downloaded from the import dialog.
+ */
+export async function downloadImportTemplate(): Promise<
+  { ok: true; base64: string; filename: string } | { ok: false; error: string }
+> {
+  try {
+    const workbook = new ExcelJS.Workbook()
+    const sheet = workbook.addWorksheet('Article Requests')
+    const sampleDate = today()
+
+    sheet.columns = [
+      { header: 'Article', key: 'article', width: 42 },
+      { header: 'Vendor', key: 'vendor', width: 20 },
+      { header: 'Quantity', key: 'quantity', width: 12 },
+      { header: 'Rate', key: 'rate', width: 12 },
+      { header: 'Request date', key: 'requestDate', width: 14 },
+      { header: 'Remarks', key: 'remarks', width: 36 },
+    ]
+
+    sheet.addRow({
+      article: 'Sample scientific article title',
+      vendor: 'ABC Ltd',
+      quantity: 1,
+      rate: 1200,
+      requestDate: sampleDate,
+      remarks: 'Sample remarks',
+    })
+    sheet.addRow({
+      article: 'Another article title',
+      vendor: 'InfoSolutions',
+      quantity: 2,
+      rate: 850,
+      requestDate: sampleDate,
+      remarks: 'Optional notes',
+    })
+
+    const headerRow = sheet.getRow(1)
+    headerRow.font = { bold: true, color: { argb: 'FFFFFFFF' } }
+    headerRow.fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FF2563EB' },
+    }
+    headerRow.alignment = { vertical: 'middle' }
+
+    // Keep the column rules next to the sample so the dialog does not need a
+    // long explanation. Delete this sheet before uploading if you prefer; only
+    // the first worksheet is read.
+    const instructions = workbook.addWorksheet('Instructions')
+    instructions.columns = [
+      { header: 'Column', key: 'column', width: 18 },
+      { header: 'Required', key: 'required', width: 12 },
+      { header: 'Also accepted as', key: 'aliases', width: 44 },
+      { header: 'Notes', key: 'notes', width: 52 },
+    ]
+
+    instructions.addRows([
+      {
+        column: 'Article',
+        required: 'Yes',
+        aliases: 'Title, Article title, Description',
+        notes: 'The article or paper title. Rows without this are skipped.',
+      },
+      {
+        column: 'Vendor',
+        required: 'No',
+        aliases: 'Supplier, Publisher',
+        notes: 'Unknown vendor names are created automatically.',
+      },
+      {
+        column: 'Quantity',
+        required: 'No',
+        aliases: 'Qty, Units, Copies',
+        notes: 'Defaults to 1 when blank.',
+      },
+      {
+        column: 'Rate',
+        required: 'No',
+        aliases: 'Price, Unit price, Cost, Amount',
+        notes: 'Unit cost in INR. Defaults to 0 when blank.',
+      },
+      {
+        column: 'Request date',
+        required: 'No',
+        aliases: 'Date, Requested on, Requested date',
+        notes: 'Any date Excel recognises. Defaults to today when blank.',
+      },
+      {
+        column: 'Remarks',
+        required: 'No',
+        aliases: 'Notes, Note, Comment, Instructions',
+        notes: 'Free text stored with the request.',
+      },
+    ])
+
+    const instructionHeader = instructions.getRow(1)
+    instructionHeader.font = { bold: true, color: { argb: 'FFFFFFFF' } }
+    instructionHeader.fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FF2563EB' },
+    }
+    instructionHeader.alignment = { vertical: 'middle' }
+    instructions.getColumn('required').alignment = { horizontal: 'center' }
+
+    const buffer = await workbook.xlsx.writeBuffer()
+    const base64 = Buffer.from(buffer as ArrayBuffer).toString('base64')
+
+    return {
+      ok: true,
+      base64,
+      filename: 'article-requests-import-template.xlsx',
+    }
+  } catch (error) {
+    console.error('Unable to build the import template workbook', error)
+    return { ok: false, error: 'Could not build the sample file.' }
+  }
+}
+
+/**
+ * Export the given article requests as an .xlsx workbook, including the
+ * related client, department, vendor, status and invoice numbers.
+ */
+export async function exportArticles(
+  articleIds: string[]
+): Promise<{ ok: true; base64: string; filename: string } | { ok: false; error: string }> {
+  if (!Array.isArray(articleIds) || articleIds.length === 0) {
+    return { ok: false, error: 'There is nothing to export.' }
+  }
+
+  try {
+    const supabase = await createClient()
+
+    const { data: articles, error: articlesError } = await supabase
+      .from('article_requests')
+      .select('*')
+      .in('id', articleIds)
+      .order('request_date', { ascending: false, nullsFirst: false })
+
+    if (articlesError) {
+      return { ok: false, error: articlesError.message }
+    }
+
+    const rows = (articles ?? []) as Array<Record<string, unknown>>
+
+    if (rows.length === 0) {
+      return { ok: false, error: 'There is nothing to export.' }
+    }
+
+    const clientIds = Array.from(
+      new Set(rows.map((row) => row.client_id).filter(Boolean) as string[])
+    )
+    const departmentIds = Array.from(
+      new Set(rows.map((row) => row.department_id).filter(Boolean) as string[])
+    )
+    const vendorIds = Array.from(
+      new Set(rows.map((row) => row.vendor_id).filter(Boolean) as string[])
+    )
+    const proformaIds = Array.from(
+      new Set(rows.map((row) => row.proforma_invoice_id).filter(Boolean) as string[])
+    )
+    const taxIds = Array.from(
+      new Set(rows.map((row) => row.tax_invoice_id).filter(Boolean) as string[])
+    )
+
+    const [clientsResult, departmentsResult, vendorsResult, proformasResult, taxResult] =
+      await Promise.all([
+        clientIds.length
+          ? supabase.from('clients').select('id, company_name').in('id', clientIds)
+          : Promise.resolve({ data: [], error: null }),
+        departmentIds.length
+          ? supabase.from('departments').select('id, department_name').in('id', departmentIds)
+          : Promise.resolve({ data: [], error: null }),
+        vendorIds.length
+          ? supabase.from('vendors').select('id, vendor_name').in('id', vendorIds)
+          : Promise.resolve({ data: [], error: null }),
+        proformaIds.length
+          ? supabase.from('proforma_invoices').select('id, pi_number, status_code').in('id', proformaIds)
+          : Promise.resolve({ data: [], error: null }),
+        taxIds.length
+          ? supabase.from('tax_invoices').select('id, tax_invoice_number, status_code').in('id', taxIds)
+          : Promise.resolve({ data: [], error: null }),
+      ])
+
+    const clientNames = new Map(
+      ((clientsResult.data ?? []) as Array<{ id: string; company_name: string }>).map((row) => [
+        row.id,
+        row.company_name,
+      ])
+    )
+    const departmentNames = new Map(
+      ((departmentsResult.data ?? []) as Array<{ id: string; department_name: string }>).map((row) => [
+        row.id,
+        row.department_name,
+      ])
+    )
+    const vendorNames = new Map(
+      ((vendorsResult.data ?? []) as Array<{ id: string; vendor_name: string }>).map((row) => [
+        row.id,
+        row.vendor_name,
+      ])
+    )
+    const proformaMap = new Map(
+      ((proformasResult.data ?? []) as Array<{ id: string; pi_number: string | null; status_code: string | null }>).map(
+        (row) => [row.id, row]
+      )
+    )
+    const taxMap = new Map(
+      ((taxResult.data ?? []) as Array<{ id: string; tax_invoice_number: string | null; status_code: string | null }>).map(
+        (row) => [row.id, row]
+      )
+    )
+
+    const workbook = new ExcelJS.Workbook()
+    const sheet = workbook.addWorksheet('Article Requests')
+
+    sheet.columns = [
+      { header: 'Article', key: 'article', width: 40 },
+      { header: 'Client', key: 'client', width: 22 },
+      { header: 'Department', key: 'department', width: 22 },
+      { header: 'Vendor', key: 'vendor', width: 20 },
+      { header: 'Contact', key: 'contact', width: 20 },
+      { header: 'Batch', key: 'batch', width: 18 },
+      { header: 'Cost', key: 'cost', width: 12 },
+      { header: 'Qty', key: 'qty', width: 8 },
+      { header: 'Total cost', key: 'totalCost', width: 14 },
+      { header: 'Urgency', key: 'urgency', width: 12 },
+      { header: 'Status', key: 'status', width: 20 },
+      { header: 'Request date', key: 'requestDate', width: 14 },
+      { header: 'Proforma', key: 'proforma', width: 18 },
+      { header: 'Tax invoice', key: 'taxInvoice', width: 18 },
+      { header: 'Created', key: 'created', width: 20 },
+    ]
+
+    for (const row of rows) {
+      const proforma = row.proforma_invoice_id
+        ? proformaMap.get(String(row.proforma_invoice_id))
+        : undefined
+      const taxInvoice = row.tax_invoice_id
+        ? taxMap.get(String(row.tax_invoice_id))
+        : undefined
+
+      const status =
+        row.tax_invoice_id
+          ? (String(taxInvoice?.status_code ?? '').toUpperCase() === 'PAID'
+              ? 'COMPLETED'
+              : 'PI_GENERATED')
+          : row.proforma_invoice_id
+            ? 'PI_GENERATED'
+            : String(row.status_code ?? '')
+
+      sheet.addRow({
+        article: String(row.article_description ?? row.article_title ?? '').trim() || 'Untitled article',
+        client: row.client_id ? clientNames.get(String(row.client_id)) ?? '' : '',
+        department: row.department_id ? departmentNames.get(String(row.department_id)) ?? '' : '',
+        vendor: row.vendor_id ? vendorNames.get(String(row.vendor_id)) ?? '' : '',
+        contact: '',
+        batch: String(row.batch_tag ?? row.batch_id ?? '').trim(),
+        cost: Number(row.cost_price ?? 0),
+        qty: Number(row.quantity ?? 1),
+        totalCost: Number(row.total_cost ?? 0),
+        urgency: String(row.urgency ?? ''),
+        status,
+        requestDate: String(row.request_date ?? '').slice(0, 10),
+        proforma: proforma?.pi_number ?? (row.proforma_invoice_id ? String(row.proforma_invoice_id).slice(0, 8).toUpperCase() : ''),
+        taxInvoice: taxInvoice?.tax_invoice_number ?? (row.tax_invoice_id ? String(row.tax_invoice_id).slice(0, 8).toUpperCase() : ''),
+        created: String(row.created_at ?? '').slice(0, 19).replace('T', ' '),
+      })
+    }
+
+    const headerRow = sheet.getRow(1)
+    headerRow.font = { bold: true, color: { argb: 'FFFFFFFF' } }
+    headerRow.fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FF2563EB' },
+    }
+    headerRow.alignment = { vertical: 'middle' }
+
+    const buffer = await workbook.xlsx.writeBuffer()
+    const base64 = Buffer.from(buffer as ArrayBuffer).toString('base64')
+
+    const stamp = new Date().toISOString().slice(0, 10)
+    return {
+      ok: true,
+      base64,
+      filename: `article-requests-${stamp}.xlsx`,
+    }
+  } catch (error) {
+    console.error('Unable to export article requests', error)
+    return { ok: false, error: 'Could not build the export file.' }
+  }
+}
+
 function describeError(error: unknown, fallback: string): string {
   if (!error || typeof error !== 'object') {
     return fallback

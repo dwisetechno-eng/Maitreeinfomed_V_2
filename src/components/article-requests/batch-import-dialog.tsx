@@ -2,8 +2,13 @@
 
 import type { DragEvent } from 'react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Download as DownloadIcon } from 'lucide-react'
 
-import { importArticleBatch, type ImportResult } from '@/actions/import-articles'
+import {
+  downloadImportTemplate,
+  importArticleBatch,
+  type ImportResult,
+} from '@/actions/import-articles'
 import {
   SUPABASE_SETUP_MESSAGE,
   getErrorMessage,
@@ -50,6 +55,7 @@ export function BatchImportDialog({
   const [file, setFile] = useState<File | null>(null)
   const [dragging, setDragging] = useState(false)
   const [importing, setImporting] = useState(false)
+  const [downloadingTemplate, setDownloadingTemplate] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
@@ -87,6 +93,26 @@ export function BatchImportDialog({
     setDepartmentId('')
     setContactId('')
     setError(null)
+  }
+
+  async function handleDownloadTemplate() {
+    setDownloadingTemplate(true)
+    setError(null)
+
+    try {
+      const result = await downloadImportTemplate()
+
+      if (!result.ok) {
+        setError(result.error)
+        return
+      }
+
+      downloadBase64(result.base64, result.filename)
+    } catch (downloadError) {
+      setError(getErrorMessage(downloadError, 'Could not download the sample file.'))
+    } finally {
+      setDownloadingTemplate(false)
+    }
   }
 
   function selectFile(nextFile: File | null) {
@@ -366,19 +392,51 @@ export function BatchImportDialog({
         </label>
 
         <div className="rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3 text-xs text-slate-600">
-          <p className="font-medium text-slate-700">Expected columns</p>
-          <p className="mt-1">
-            <span className="font-medium text-slate-800">Article</span> (required),{' '}
-            <span className="font-medium text-slate-800">Vendor</span>,{' '}
-            <span className="font-medium text-slate-800">Quantity</span>,{' '}
-            <span className="font-medium text-slate-800">Rate</span>,{' '}
-            <span className="font-medium text-slate-800">Request date</span>,{' '}
-            <span className="font-medium text-slate-800">Remarks</span>. Headers are matched
-            case-insensitively, and common aliases such as “Title”, “Qty”, “Price” and “Notes”
-            work too. Unknown vendors are created automatically.
-          </p>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <p className="font-medium text-slate-700">Sample Excel file</p>
+              <p className="mt-0.5">
+                Not sure about the layout? Download the sample, replace the example rows with your
+                articles, then upload it here.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => void handleDownloadTemplate()}
+              disabled={downloadingTemplate}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-brand-700 shadow-sm transition hover:bg-brand-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 disabled:opacity-60"
+            >
+              {downloadingTemplate ? (
+                <SpinnerIcon className="h-3.5 w-3.5" />
+              ) : (
+                <DownloadIcon className="h-3.5 w-3.5" />
+              )}
+              {downloadingTemplate ? 'Preparing…' : 'Download sample file'}
+            </button>
+          </div>
         </div>
       </div>
     </Modal>
   )
+}
+
+function downloadBase64(base64: string, filename: string) {
+  const binary = atob(base64)
+  const bytes = new Uint8Array(binary.length)
+
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index)
+  }
+
+  const blob = new Blob([bytes], {
+    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  })
+  const url = URL.createObjectURL(blob)
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = filename
+  document.body.appendChild(anchor)
+  anchor.click()
+  document.body.removeChild(anchor)
+  URL.revokeObjectURL(url)
 }
