@@ -8,14 +8,15 @@
     "start": "next start",
     "create-admin": "node scripts/create-admin.mjs",
     "deploy": "npm run build && git add . && git commit -m \"Update and deploy to Vercel\" && git push origin main"
-
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.7",
     "@supabase/supabase-js": "^2.119.0",
+    "docx": "^9.15.3",
     "exceljs": "^4.4.0",
     "lucide-react": "^1.68.0",
     "next": "16.4.5",
+    "pdf-lib": "^1.17.1",
     "react": "19.3.1",
     "react-dom": "19.3.1"
   },

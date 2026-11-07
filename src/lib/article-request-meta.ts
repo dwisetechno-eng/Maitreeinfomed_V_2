@@ -86,6 +86,7 @@ export type ArticleRequestRow = {
   id: string
   client_id: string | null
   department_id: string | null
+  contact_id?: string | null
   vendor_id: string | null
   quantity: number | null
   status_code: string | null

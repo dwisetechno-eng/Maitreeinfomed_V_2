@@ -1,7 +1,18 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Eye, ListChecks, Pencil, Plus, RefreshCw, Search, Trash2 } from 'lucide-react'
+import {
+  Download,
+  Eye,
+  ListChecks,
+  Pencil,
+  Plus,
+  RefreshCw,
+  Search,
+  Trash2,
+} from 'lucide-react'
+
+import { downloadTaxInvoicePdf } from '@/actions/invoice-documents'
 
 import {
   SUPABASE_SETUP_MESSAGE,
@@ -88,6 +99,7 @@ export function TaxInvoiceManager() {
   const [deleteTarget, setDeleteTarget] = useState<InvoiceWithLinks | null>(null)
   const [deleteError, setDeleteError] = useState<string | null>(null)
   const [deleting, setDeleting] = useState(false)
+  const [downloadingId, setDownloadingId] = useState<string | null>(null)
 
   const clientNames = useMemo(() => {
     const map = new Map<string, string>()
@@ -517,6 +529,61 @@ export function TaxInvoiceManager() {
     await loadData({ silent: true })
   }
 
+  async function handleDownloadPdf(invoice: InvoiceWithLinks) {
+    if (downloadingId) {
+      return
+    }
+
+    setDownloadingId(invoice.id)
+    setNotice(null)
+
+    try {
+      const result = await downloadTaxInvoicePdf(invoice.id)
+
+      if (!result.ok) {
+        setNotice({ tone: 'error', message: result.error })
+        return
+      }
+
+      downloadBase64(result.base64, result.filename, result.mimeType)
+      setNotice({
+        tone: 'success',
+        message: `Downloaded ${
+          invoice.tax_invoice_number?.trim() || 'the tax invoice'
+        } as a PDF.`,
+      })
+    } catch (downloadError) {
+      setNotice({
+        tone: 'error',
+        message: getErrorMessage(
+          downloadError,
+          'Could not generate the tax invoice PDF.'
+        ),
+      })
+    } finally {
+      setDownloadingId(null)
+    }
+  }
+
+  function downloadBase64(base64: string, filename: string, mimeType: string) {
+    const binary = atob(base64)
+    const bytes = new Uint8Array(binary.length)
+
+    for (let index = 0; index < binary.length; index += 1) {
+      bytes[index] = binary.charCodeAt(index)
+    }
+
+    const blob = new Blob([bytes], { type: mimeType })
+    const url = URL.createObjectURL(blob)
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = filename
+    document.body.appendChild(anchor)
+    anchor.click()
+    document.body.removeChild(anchor)
+    URL.revokeObjectURL(url)
+  }
+
   async function handleDelete() {
     if (!deleteTarget) {
       return
@@ -903,6 +970,28 @@ export function TaxInvoiceManager() {
                             size="sm"
                             icon={<Eye />}
                             onClick={() => setViewTarget(invoice)}
+                          />
+                          <IconButton
+                            label={`Download ${
+                              invoice.tax_invoice_number ?? 'tax invoice'
+                            } as PDF`}
+                            tooltipText={
+                              downloadingId === invoice.id
+                                ? 'Generating PDF…'
+                                : 'Download PDF'
+                            }
+                            tooltip="native"
+                            variant="ghost"
+                            size="sm"
+                            icon={
+                              downloadingId === invoice.id ? (
+                                <SpinnerIcon className="h-4 w-4" />
+                              ) : (
+                                <Download />
+                              )
+                            }
+                            disabled={downloadingId !== null}
+                            onClick={() => void handleDownloadPdf(invoice)}
                           />
                           <IconButton
                             label={`Edit ${invoice.tax_invoice_number ?? 'tax invoice'}`}

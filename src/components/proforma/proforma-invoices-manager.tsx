@@ -13,6 +13,7 @@ import {
   Trash2,
 } from 'lucide-react'
 
+import { downloadProformaDocument } from '@/actions/invoice-documents'
 import { CreateProformaDialog } from '@/components/dialogs/CreateProformaDialog'
 import {
   SUPABASE_SETUP_MESSAGE,
@@ -135,6 +136,7 @@ export function ProformaInvoicesManager() {
   const [deleteTarget, setDeleteTarget] = useState<ProformaInvoiceRow | null>(null)
   const [deleteError, setDeleteError] = useState<string | null>(null)
   const [deleting, setDeleting] = useState(false)
+  const [downloadingId, setDownloadingId] = useState<string | null>(null)
 
   const clientNames = useMemo(() => {
     const map = new Map<string, string>()
@@ -756,11 +758,59 @@ export function ProformaInvoicesManager() {
     }
   }
 
-  function handleDownloadWord(invoice: ProformaInvoiceRow) {
-    const reference = invoice.pi_number?.trim() || invoice.id.slice(0, 8).toUpperCase()
-    window.alert(
-      `Word export is coming soon.\n\n${reference} will be downloadable as a .docx once the invoice template is connected.`
-    )
+  async function handleDownloadWord(invoice: ProformaInvoiceRow) {
+    if (downloadingId) {
+      return
+    }
+
+    setDownloadingId(invoice.id)
+    setNotice(null)
+
+    try {
+      const result = await downloadProformaDocument(invoice.id)
+
+      if (!result.ok) {
+        setNotice({ tone: 'error', message: result.error })
+        return
+      }
+
+      downloadBase64(result.base64, result.filename, result.mimeType)
+      setNotice({
+        tone: 'success',
+        message: `Downloaded ${
+          invoice.pi_number?.trim() || 'the proforma invoice'
+        } as a Word document.`,
+      })
+    } catch (downloadError) {
+      setNotice({
+        tone: 'error',
+        message: getErrorMessage(
+          downloadError,
+          'Could not generate the proforma invoice document.'
+        ),
+      })
+    } finally {
+      setDownloadingId(null)
+    }
+  }
+
+  function downloadBase64(base64: string, filename: string, mimeType: string) {
+    const binary = atob(base64)
+    const bytes = new Uint8Array(binary.length)
+
+    for (let index = 0; index < binary.length; index += 1) {
+      bytes[index] = binary.charCodeAt(index)
+    }
+
+    const blob = new Blob([bytes], { type: mimeType })
+    const url = URL.createObjectURL(blob)
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = filename
+    document.body.appendChild(anchor)
+    anchor.click()
+    document.body.removeChild(anchor)
+    URL.revokeObjectURL(url)
   }
 
   return (
@@ -1027,12 +1077,23 @@ export function ProformaInvoicesManager() {
                         />
                         <IconButton
                           label={`Download ${invoice.pi_number ?? 'invoice'} as Word`}
-                          tooltipText="Download Word (.docx)"
+                          tooltipText={
+                            downloadingId === invoice.id
+                              ? 'Generating Word document…'
+                              : 'Download Word (.docx)'
+                          }
                           tooltip="native"
                           variant="ghost"
                           size="sm"
-                          icon={<Download />}
-                          onClick={() => handleDownloadWord(invoice)}
+                          icon={
+                            downloadingId === invoice.id ? (
+                              <SpinnerIcon className="h-4 w-4" />
+                            ) : (
+                              <Download />
+                            )
+                          }
+                          disabled={downloadingId !== null}
+                          onClick={() => void handleDownloadWord(invoice)}
                         />
                         <IconButton
                           label={`Edit ${invoice.pi_number ?? 'invoice'}`}
