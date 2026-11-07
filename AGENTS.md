@@ -23,6 +23,13 @@ Next.js 16 (App Router, Turbopack) + Supabase app for scientific article request
 - Reversal order matters: remove a proforma from its tax invoice before editing/deleting the proforma; remove receipt allocations (or delete the receipt) to recalculate invoices.
 - Invoice numbering lives in `src/lib/proforma-invoices.ts` and `src/lib/tax-invoices.ts` (`PI-YYYYMM-NNNN`, `TI-YYYYMM-NNNN`); use those helpers.
 
+## Invoice documents
+
+- Proforma invoices download as Word (`.docx`) and tax invoices as PDF. The generators are `src/lib/proforma-docx.ts` (`docx`) and `src/lib/tax-invoice-pdf.ts` (`pdf-lib`), driven by the shared model in `src/lib/invoice-documents.ts`.
+- `src/actions/invoice-documents.ts` fetches the invoice, client, linked articles and proformas, renders the file and returns base64; the managers trigger the browser download.
+- Seller details, buyer USV address/GSTIN and service/PO defaults are hardcoded in `src/lib/invoice-documents.ts`; `clients.location`/`gstin` override the buyer values. Optional JSON in `document_content` overrides PO, attention, service text and dates.
+- Line items are one row per linked article request at SAC `998393`; an adjustment line reconciles the line total to the stored subtotal.
+
 ## Supabase schema
 
 - Schema changes are additive SQL files in `supabase/migrations/`; there is no `supabase/config.toml`, so apply them in the Supabase SQL editor or with `supabase db push`.

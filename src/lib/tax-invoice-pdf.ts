@@ -542,7 +542,11 @@ export async function renderTaxInvoicePdf(data: InvoiceDocumentData): Promise<Ui
   const font = await doc.embedFont(StandardFonts.TimesRoman)
   const bold = await doc.embedFont(StandardFonts.TimesRomanBold)
   const italic = await doc.embedFont(StandardFonts.TimesRomanItalic)
-  const logo = await doc.embedJpg(Buffer.from(MAITREE_LOGO_BASE64, 'base64'))
+  // pdf-lib reads the JPEG from `buffer` without honouring `byteOffset`, and
+  // Node may return a Buffer that is a slice of a shared pool. Copy into a
+  // standalone Uint8Array so the embedded bytes always start with the SOI.
+  const logoBytes = new Uint8Array(Buffer.from(MAITREE_LOGO_BASE64, 'base64'))
+  const logo = await doc.embedJpg(logoBytes)
 
   const ctx: RenderContext = {
     doc,
