@@ -800,9 +800,18 @@ export async function exportArticles(
     const taxIds = Array.from(
       new Set(rows.map((row) => row.tax_invoice_id).filter(Boolean) as string[])
     )
+    const contactIds = Array.from(
+      new Set(rows.map((row) => row.contact_id).filter(Boolean) as string[])
+    )
 
-    const [clientsResult, departmentsResult, vendorsResult, proformasResult, taxResult] =
-      await Promise.all([
+    const [
+      clientsResult,
+      departmentsResult,
+      vendorsResult,
+      proformasResult,
+      taxResult,
+      contactsResult,
+    ] = await Promise.all([
         clientIds.length
           ? supabase.from('clients').select('id, company_name').in('id', clientIds)
           : Promise.resolve({ data: [], error: null }),
@@ -817,6 +826,9 @@ export async function exportArticles(
           : Promise.resolve({ data: [], error: null }),
         taxIds.length
           ? supabase.from('tax_invoices').select('id, tax_invoice_number, status_code').in('id', taxIds)
+          : Promise.resolve({ data: [], error: null }),
+        contactIds.length
+          ? supabase.from('client_contacts').select('id, contact_name').in('id', contactIds)
           : Promise.resolve({ data: [], error: null }),
       ])
 
@@ -847,6 +859,12 @@ export async function exportArticles(
       ((taxResult.data ?? []) as Array<{ id: string; tax_invoice_number: string | null; status_code: string | null }>).map(
         (row) => [row.id, row]
       )
+    )
+    const contactNames = new Map(
+      ((contactsResult.data ?? []) as Array<{ id: string; contact_name: string }>).map((row) => [
+        row.id,
+        row.contact_name,
+      ])
     )
 
     const workbook = new ExcelJS.Workbook()
@@ -892,7 +910,7 @@ export async function exportArticles(
         client: row.client_id ? clientNames.get(String(row.client_id)) ?? '' : '',
         department: row.department_id ? departmentNames.get(String(row.department_id)) ?? '' : '',
         vendor: row.vendor_id ? vendorNames.get(String(row.vendor_id)) ?? '' : '',
-        contact: '',
+        contact: row.contact_id ? contactNames.get(String(row.contact_id)) ?? '' : '',
         batch: String(row.batch_tag ?? row.batch_id ?? '').trim(),
         cost: Number(row.cost_price ?? 0),
         qty: Number(row.quantity ?? 1),
