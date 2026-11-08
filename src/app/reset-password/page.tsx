@@ -3,7 +3,7 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { Eye, EyeOff, FlaskConical, KeyRound, Lock, ShieldCheck } from 'lucide-react'
+import { Eye, EyeOff, KeyRound, Lock, ShieldCheck } from 'lucide-react'
 
 import {
   SUPABASE_SETUP_MESSAGE,
@@ -13,6 +13,7 @@ import {
   labelClass,
   primaryButtonClass,
 } from '@/components/masters/utils'
+import { BrandMark } from '@/components/brand/brand-mark'
 import { Alert } from '@/components/ui/alert'
 import { SpinnerIcon } from '@/components/ui/icons'
 import { createClient } from '@/utils/supabase/client'
@@ -153,9 +154,7 @@ export default function ResetPasswordPage() {
       <div className="flex flex-1 items-center justify-center px-4 py-10 sm:px-6">
         <div className="w-full max-w-md">
           <div className="mb-6 flex items-center justify-center gap-3">
-            <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-brand-600 text-white shadow-sm shadow-brand-900/20">
-              <FlaskConical className="h-6 w-6" />
-            </span>
+            <BrandMark className="h-12 w-12 drop-shadow-sm" />
             <div className="leading-tight">
               <p className="text-base font-semibold tracking-tight text-slate-900">
                 Maitree Infomed

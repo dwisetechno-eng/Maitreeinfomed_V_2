@@ -46,6 +46,8 @@ type TaxInvoiceRow = {
   subtotal: number | null
   tax_total: number | null
   grand_total: number | null
+  po_number: string | null
+  po_date: string | null
   document_content: string | null
   created_at: string | null
 }
@@ -363,6 +365,8 @@ export async function downloadTaxInvoiceDocument(
       grandTotal: Number(invoice.grand_total ?? 0),
       documentContent: invoice.document_content,
       linkedProformaNumbers: proformas.map((proforma) => proforma.pi_number),
+      buyerOrderNo: invoice.po_number,
+      buyerOrderDate: invoice.po_date,
     })
 
     const buffer = await renderInvoiceDocx(data)

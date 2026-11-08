@@ -207,6 +207,7 @@ export function TaxInvoiceManager() {
 
       return [
         invoice.tax_invoice_number ?? '',
+        invoice.po_number ?? '',
         invoice.client_id ? clientNames.get(invoice.client_id) ?? '' : '',
         status,
         statusLabels.get(status) ?? '',
@@ -773,7 +774,7 @@ export function TaxInvoiceManager() {
               type="search"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="Search invoice number or client"
+              placeholder="Search invoice number, PO number or client"
               aria-label="Search tax invoices"
               className={`${inputClass} pl-9`}
             />
@@ -874,7 +875,7 @@ export function TaxInvoiceManager() {
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="min-w-[1150px] divide-y divide-slate-200 text-sm">
+            <table className="min-w-[1350px] divide-y divide-slate-200 text-sm">
               <caption className="sr-only">Tax invoices</caption>
               <thead className="bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
                 <tr>
@@ -883,6 +884,12 @@ export function TaxInvoiceManager() {
                   </th>
                   <th scope="col" className="px-4 py-3">
                     Date
+                  </th>
+                  <th scope="col" className="px-4 py-3">
+                    PO number
+                  </th>
+                  <th scope="col" className="px-4 py-3">
+                    PO date
                   </th>
                   <th scope="col" className="px-4 py-3">
                     Client
@@ -921,6 +928,12 @@ export function TaxInvoiceManager() {
                       </td>
                       <td className="whitespace-nowrap px-4 py-3 text-slate-600">
                         {formatDate(invoice.invoice_date ?? invoice.created_at)}
+                      </td>
+                      <td className="whitespace-nowrap px-4 py-3 font-mono text-xs text-slate-600">
+                        {invoice.po_number?.trim() || '—'}
+                      </td>
+                      <td className="whitespace-nowrap px-4 py-3 text-slate-600">
+                        {formatDate(invoice.po_date)}
                       </td>
                       <td className="px-4 py-3 font-medium text-slate-900">
                         {invoice.client_id
@@ -1056,6 +1069,8 @@ export function TaxInvoiceManager() {
             <dl className="grid gap-3 rounded-xl border border-slate-200 bg-slate-50/70 p-4 text-sm sm:grid-cols-2 lg:grid-cols-4">
               <Detail label="Invoice number" value={viewTarget.tax_invoice_number ?? '—'} mono />
               <Detail label="Invoice date" value={formatDate(viewTarget.invoice_date)} />
+              <Detail label="PO number" value={viewTarget.po_number?.trim() || '—'} mono />
+              <Detail label="PO date" value={formatDate(viewTarget.po_date)} />
               <Detail
                 label="Client"
                 value={

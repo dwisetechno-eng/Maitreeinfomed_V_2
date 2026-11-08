@@ -11,7 +11,6 @@ import {
   CreditCard,
   FileSpreadsheet,
   FileText,
-  FlaskConical,
   Layers,
   LayoutDashboard,
   LogOut,
@@ -24,6 +23,7 @@ import {
   type LucideIcon,
 } from 'lucide-react'
 
+import { BrandMark } from '@/components/brand/brand-mark'
 import { createClient } from '@/utils/supabase/client'
 
 export type AppUser = {
@@ -135,9 +135,7 @@ export function AppShell({ user, children }: { user?: AppUser | null; children: 
           href="/dashboard"
           className="flex min-w-0 items-center gap-3 rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
         >
-          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-brand-600 text-white shadow-sm shadow-brand-900/20">
-            <FlaskConical className="h-5 w-5" />
-          </span>
+          <BrandMark className="h-10 w-10 shrink-0 drop-shadow-sm" />
           <span className="flex min-w-0 flex-col leading-tight">
             <span className="truncate text-sm font-semibold tracking-tight text-slate-900">
               Maitree Infomed

@@ -102,6 +102,9 @@ export type InvoiceDocumentInput = {
   grandTotal: number
   documentContent?: string | null
   linkedProformaNumbers?: Array<string | null>
+  /** Purchase order captured on the tax invoice; overrides template defaults. */
+  buyerOrderNo?: string | null
+  buyerOrderDate?: string | null
 }
 
 /** Seller details fixed in the supplied templates. */
@@ -544,20 +547,24 @@ export function buildInvoiceDocumentData(
   const cgstAmount = roundMoney(taxTotal / 2)
   const sgstAmount = roundMoney(taxTotal - cgstAmount)
 
+  const buyerOrderNo =
+    input.buyerOrderNo?.trim() ||
+    overrides.buyer_order_no ||
+    (kind === 'TAX' ? DEFAULT_BUYER_ORDER_NO : '')
+
+  const buyerOrderDate =
+    input.buyerOrderDate?.trim() ||
+    overrides.buyer_order_date ||
+    (kind === 'TAX' ? DEFAULT_BUYER_ORDER_DATE : '')
+
   return {
     kind,
     title: kind === 'TAX' ? 'TAX INVOICE' : 'PROFORMA INVOICE',
     invoiceLabel: kind === 'TAX' ? 'Tax Invoice No.' : 'Proforma Invoice No.',
     invoiceNumber: input.invoiceNumber.trim(),
     invoiceDateLabel: formatDocumentDate(invoiceDate),
-    buyerOrderNo:
-      overrides.buyer_order_no ??
-      (kind === 'TAX' ? DEFAULT_BUYER_ORDER_NO : ''),
-    buyerOrderDateLabel: overrides.buyer_order_date
-      ? formatDocumentDate(overrides.buyer_order_date)
-      : kind === 'TAX'
-        ? formatDocumentDate(DEFAULT_BUYER_ORDER_DATE)
-        : '',
+    buyerOrderNo,
+    buyerOrderDateLabel: buyerOrderDate ? formatDocumentDate(buyerOrderDate) : '',
     modeOfPayment: overrides.mode_of_payment ?? '',
     kindAttention,
     purchaseOf: overrides.purchase_of ?? PURCHASE_OF_ARTICLES,

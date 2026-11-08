@@ -52,6 +52,8 @@ type FormState = {
   tax_invoice_number: string
   tax_invoice_date: string
   client_id: string
+  po_number: string
+  po_date: string
   subtotal: string
   tax_rate: string
   status_code: string
@@ -73,6 +75,8 @@ const EMPTY_FORM: FormState = {
   tax_invoice_number: '',
   tax_invoice_date: todayIsoDate(),
   client_id: '',
+  po_number: '',
+  po_date: '',
   subtotal: '',
   tax_rate: String(DEFAULT_TAX_RATE),
   status_code: 'UNPAID',
@@ -129,6 +133,8 @@ export function TaxInvoiceDialog({
         tax_invoice_number: invoice.tax_invoice_number ?? '',
         tax_invoice_date: (invoice.invoice_date ?? todayIsoDate()).slice(0, 10),
         client_id: invoice.client_id ?? '',
+        po_number: invoice.po_number ?? '',
+        po_date: (invoice.po_date ?? '').slice(0, 10),
         subtotal: String(subtotal),
         tax_rate: String(derivedRate),
         status_code: invoice.status_code ?? 'UNPAID',
@@ -396,6 +402,8 @@ export function TaxInvoiceDialog({
       tax_invoice_number: number,
       client_id: form.client_id,
       invoice_date: form.tax_invoice_date,
+      po_number: form.po_number.trim() || null,
+      po_date: form.po_date || null,
       subtotal: roundMoney(subtotal),
       tax_total: roundMoney(taxTotal),
       grand_total: roundMoney(grandTotal),
@@ -410,7 +418,29 @@ export function TaxInvoiceDialog({
           .eq('id', invoice.id)
 
         if (updateError) {
-          throw updateError
+          if (!isMissingColumnError(updateError)) {
+            throw updateError
+          }
+
+          // The PO columns have not been migrated yet; save everything else.
+          const legacyPayload: Record<string, unknown> = { ...payload }
+          delete legacyPayload.po_number
+          delete legacyPayload.po_date
+
+          const { error: legacyError } = await supabase
+            .from('tax_invoices')
+            .update(legacyPayload)
+            .eq('id', invoice.id)
+
+          if (legacyError) {
+            throw legacyError
+          }
+
+          await onSaved(
+            `Tax invoice ${number} was updated. Apply the latest Supabase migration to store the PO number and date.`
+          )
+          onClose()
+          return
         }
 
         await onSaved(`Tax invoice ${number} was updated.`)
@@ -425,6 +455,7 @@ export function TaxInvoiceDialog({
     }
 
     let createdId: string | null = null
+    let poSkipped = false
     const previousLinks: ProformaLinkSnapshot[] = selectedProformas.map((proforma) => ({
       id: proforma.id,
       status_code: proforma.status_code,
@@ -432,7 +463,7 @@ export function TaxInvoiceDialog({
     }))
 
     try {
-      const { data: created, error: insertError } = await supabase
+      let { data: created, error: insertError } = await supabase
         .from('tax_invoices')
         .insert({
           ...payload,
@@ -440,6 +471,24 @@ export function TaxInvoiceDialog({
         })
         .select('id')
         .single()
+
+      if (insertError && isMissingColumnError(insertError)) {
+        // The PO columns have not been migrated yet; create the invoice without
+        // them so the conversion still completes.
+        const legacyPayload: Record<string, unknown> = { ...payload, amount_paid: 0 }
+        delete legacyPayload.po_number
+        delete legacyPayload.po_date
+
+        const retry = await supabase
+          .from('tax_invoices')
+          .insert(legacyPayload)
+          .select('id')
+          .single()
+
+        created = retry.data
+        insertError = retry.error
+        poSkipped = true
+      }
 
       if (insertError) {
         throw insertError
@@ -512,7 +561,7 @@ export function TaxInvoiceDialog({
                 selectedProformas.length === 1 ? '' : 's'
               }`
             : ''
-        }.`
+        }.${poSkipped ? ' Apply the latest Supabase migration to store the PO number and date.' : ''}`
       )
       onClose()
     } catch (submitError) {
@@ -729,6 +778,39 @@ export function TaxInvoiceDialog({
             ))}
           </select>
         </div>
+
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div>
+            <label htmlFor="tax-po-number" className={labelClass}>
+              Purchase order number
+            </label>
+            <input
+              id="tax-po-number"
+              value={form.po_number}
+              onChange={(event) => updateForm('po_number', event.target.value)}
+              maxLength={80}
+              placeholder="e.g. 6600088911"
+              className={`${inputClass} font-mono`}
+            />
+          </div>
+
+          <div>
+            <label htmlFor="tax-po-date" className={labelClass}>
+              Purchase order date
+            </label>
+            <input
+              id="tax-po-date"
+              type="date"
+              value={form.po_date}
+              onChange={(event) => updateForm('po_date', event.target.value)}
+              className={inputClass}
+            />
+          </div>
+        </div>
+        <p className="-mt-1 text-xs text-slate-500">
+          Printed on the tax invoice as the buyer&apos;s order number and date. Leave blank to use
+          the template default.
+        </p>
 
         {useProformaSource ? (
           <div className="space-y-3">

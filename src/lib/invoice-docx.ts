@@ -2,10 +2,11 @@
  * Word (.docx) invoice renderer used by both the proforma invoice and the tax
  * invoice downloads.
  *
- * The layout is generated from scratch with `docx`: a coloured letterhead band,
- * billed-from / billed-to cards, order details, a zebra-striped item table and a
- * highlighted totals block. No image assets are embedded, so the file stays
- * small and opens cleanly in Word, LibreOffice and Google Docs.
+ * The layout is generated from scratch with `docx`: a coloured letterhead band
+ * with the Maitree Infomed mark, billed-from / billed-to cards, order details, a
+ * zebra-striped item table and a highlighted totals block. Proforma invoices
+ * use a blue theme and tax invoices the brand green, so the two documents are
+ * distinguishable at a glance.
  */
 
 import {
@@ -13,6 +14,7 @@ import {
   BorderStyle,
   Document,
   Footer,
+  ImageRun,
   Packer,
   Paragraph,
   Table,
@@ -24,19 +26,54 @@ import {
   type IBorderOptions,
 } from 'docx'
 
-import { formatMoney, type InvoiceDocumentData } from '@/lib/invoice-documents'
+import {
+  formatMoney,
+  type InvoiceDocumentData,
+  type InvoiceKind,
+} from '@/lib/invoice-documents'
+import { MAITREE_LOGO_PNG_BASE64 } from '@/lib/maitree-logo'
 
 const FONT = 'Arial'
 const CONTENT_WIDTH = 10466 // A4 width (11906) minus 0.5" margins on both sides.
 
 const INK = '0F172A'
 const MUTED = '475569'
-const PRIMARY = '065F46'
-const PRIMARY_SOFT = 'D1FAE5'
-const PRIMARY_PALE = 'F0FDF4'
 const SURFACE = 'F8FAFC'
 const BORDER = 'CBD5E1'
 const WHITE = 'FFFFFF'
+
+type InvoiceTheme = {
+  primary: string
+  primarySoft: string
+  primaryPale: string
+  accent: string
+  headerAccent: string
+  headerMuted: string
+}
+
+/** Tax invoices keep the brand green. */
+const TAX_THEME: InvoiceTheme = {
+  primary: '065F46',
+  primarySoft: 'D1FAE5',
+  primaryPale: 'F0FDF4',
+  accent: '10B981',
+  headerAccent: 'A7F3D0',
+  headerMuted: 'E2F8EF',
+}
+
+/** Proforma invoices use a distinct blue so the two documents differ. */
+const PROFORMA_THEME: InvoiceTheme = {
+  primary: '1E3A8A',
+  primarySoft: 'DBEAFE',
+  primaryPale: 'EFF6FF',
+  accent: '3B82F6',
+  headerAccent: 'BFDBFE',
+  headerMuted: 'DBEAFE',
+}
+
+function invoiceTheme(kind: InvoiceKind): InvoiceTheme {
+  return kind === 'TAX' ? TAX_THEME : PROFORMA_THEME
+}
 
 const GRID_BORDER: IBorderOptions = {
   style: BorderStyle.SINGLE,
@@ -137,7 +174,12 @@ function label(text: string, color = MUTED): Paragraph {
   })
 }
 
-function headerCell(text: string, width: number, align?: ParagraphOptions['align']): TableCell {
+function headerCell(
+  text: string,
+  width: number,
+  align: ParagraphOptions['align'],
+  theme: InvoiceTheme
+): TableCell {
   return cell(
     [
       line(text, {
@@ -147,12 +189,13 @@ function headerCell(text: string, width: number, align?: ParagraphOptions['align
         align: align ?? AlignmentType.LEFT,
       }),
     ],
-    { width, shading: PRIMARY, verticalAlign: VerticalAlignTable.CENTER }
+    { width, shading: theme.primary, verticalAlign: VerticalAlignTable.CENTER }
   )
 }
 
 function buildLetterhead(data: InvoiceDocumentData): Table {
   const seller = data.seller
+  const theme = invoiceTheme(data.kind)
 
   return new Table({
     width: { size: CONTENT_WIDTH, type: WidthType.DXA },
@@ -164,32 +207,57 @@ function buildLetterhead(data: InvoiceDocumentData): Table {
         children: [
           cell(
             [
+              new Paragraph({
+                children: [
+                  new ImageRun({
+                    type: 'png',
+                    data: Buffer.from(MAITREE_LOGO_PNG_BASE64, 'base64'),
+                    transformation: { width: 44, height: 44 },
+                    altText: {
+                      name: 'Maitree Infomed',
+                      title: 'Maitree Infomed',
+                      description: 'Maitree Infomed brand mark',
+                    },
+                  }),
+                ],
+              }),
+            ],
+            {
+              width: 980,
+              shading: theme.primary,
+              borders: NO_BORDERS,
+              margins: { top: 160, bottom: 160, left: 200, right: 100 },
+              verticalAlign: VerticalAlignTable.CENTER,
+            }
+          ),
+          cell(
+            [
               line(seller.name, { size: 34, bold: true, color: WHITE, after: 40 }),
               line('SCIENTIFIC ARTICLE PROCUREMENT', {
                 size: 12,
                 bold: true,
-                color: 'A7F3D0',
+                color: theme.headerAccent,
                 after: 90,
               }),
               ...seller.addressLines.map((text) =>
-                line(text, { size: 15, color: 'E2F8EF' })
+                line(text, { size: 15, color: theme.headerMuted })
               ),
               line(`${seller.email}  |  Tel: ${seller.phone}`, {
                 size: 15,
-                color: 'E2F8EF',
+                color: theme.headerMuted,
               }),
-              line(`MSME no. ${seller.msme}`, { size: 15, color: 'E2F8EF' }),
-              line(`GSTIN/UIN: ${seller.gstin}`, { size: 15, color: 'E2F8EF' }),
+              line(`MSME no. ${seller.msme}`, { size: 15, color: theme.headerMuted }),
+              line(`GSTIN/UIN: ${seller.gstin}`, { size: 15, color: theme.headerMuted }),
               line(`State: ${seller.stateName}, Code: ${seller.stateCode}`, {
                 size: 15,
-                color: 'E2F8EF',
+                color: theme.headerMuted,
               }),
             ],
             {
-              width: 6500,
-              shading: PRIMARY,
+              width: 5200,
+              shading: theme.primary,
               borders: NO_BORDERS,
-              margins: { top: 160, bottom: 160, left: 200, right: 200 },
+              margins: { top: 160, bottom: 160, left: 140, right: 140 },
               verticalAlign: VerticalAlignTable.CENTER,
             }
           ),
@@ -207,7 +275,7 @@ function buildLetterhead(data: InvoiceDocumentData): Table {
               line(data.invoiceLabel, {
                 size: 13,
                 bold: true,
-                color: 'A7F3D0',
+                color: theme.headerAccent,
                 align: AlignmentType.RIGHT,
                 after: 10,
               }),
@@ -220,15 +288,15 @@ function buildLetterhead(data: InvoiceDocumentData): Table {
               }),
               line(`Dated ${data.invoiceDateLabel}`, {
                 size: 15,
-                color: 'E2F8EF',
+                color: theme.headerMuted,
                 align: AlignmentType.RIGHT,
               }),
             ],
             {
-              width: CONTENT_WIDTH - 6500,
-              shading: PRIMARY,
+              width: CONTENT_WIDTH - 980 - 5200,
+              shading: theme.primary,
               borders: NO_BORDERS,
-              margins: { top: 160, bottom: 160, left: 200, right: 200 },
+              margins: { top: 160, bottom: 160, left: 140, right: 200 },
               verticalAlign: VerticalAlignTable.CENTER,
             }
           ),
@@ -241,6 +309,7 @@ function buildLetterhead(data: InvoiceDocumentData): Table {
 function buildPartyCards(data: InvoiceDocumentData): Table {
   const seller = data.seller
   const buyer = data.buyer
+  const theme = invoiceTheme(data.kind)
 
   return new Table({
     width: { size: CONTENT_WIDTH, type: WidthType.DXA },
@@ -252,7 +321,7 @@ function buildPartyCards(data: InvoiceDocumentData): Table {
         children: [
           cell(
             [
-              label('Billed From', PRIMARY),
+              label('Billed From', theme.primary),
               line(seller.name, { size: 20, bold: true, after: 40 }),
               ...seller.addressLines.map((text) => line(text, { size: 15, color: MUTED })),
               line(`GSTIN/UIN: ${seller.gstin}`, { size: 15, color: MUTED }),
@@ -265,7 +334,7 @@ function buildPartyCards(data: InvoiceDocumentData): Table {
           ),
           cell(
             [
-              label('Billed To', PRIMARY),
+              label('Billed To', theme.primary),
               line(buyer.name, { size: 20, bold: true, after: 40 }),
               ...buyer.addressLines.map((text) => line(text, { size: 15, color: MUTED })),
               line(`GSTIN/UIN: ${buyer.gstin}`, { size: 15, color: MUTED }),
@@ -347,6 +416,8 @@ function buildOrderDetails(data: InvoiceDocumentData): Table {
 }
 
 function buildServiceNote(data: InvoiceDocumentData): Table {
+  const theme = invoiceTheme(data.kind)
+
   return new Table({
     width: { size: CONTENT_WIDTH, type: WidthType.DXA },
     layout: 'fixed',
@@ -359,7 +430,7 @@ function buildServiceNote(data: InvoiceDocumentData): Table {
             [
               line(
                 `Service Code: ${data.serviceCode}   |   SAC code: ${data.sacCode}`,
-                { size: 15, bold: true, color: PRIMARY }
+                { size: 15, bold: true, color: theme.primary }
               ),
               line(`Service Description: ${data.serviceDescription}`, {
                 size: 15,
@@ -368,7 +439,7 @@ function buildServiceNote(data: InvoiceDocumentData): Table {
             ],
             {
               width: CONTENT_WIDTH,
-              shading: PRIMARY_PALE,
+              shading: theme.primaryPale,
               borders: NO_BORDERS,
               margins: CELL_MARGINS,
             }
@@ -380,6 +451,7 @@ function buildServiceNote(data: InvoiceDocumentData): Table {
 }
 
 function buildItemsTable(data: InvoiceDocumentData): Table {
+  const theme = invoiceTheme(data.kind)
   const widths = [600, 4100, 1100, 900, 1300, 600, 1866]
   const headers: Array<[string, number, ParagraphOptions['align']?]> = [
     ['Sl No.', widths[0], AlignmentType.CENTER],
@@ -398,17 +470,17 @@ function buildItemsTable(data: InvoiceDocumentData): Table {
         children: [
           cell([line(String(item.serial), { size: 15, align: AlignmentType.CENTER })], {
             width: widths[0],
-            shading: index % 2 === 1 ? PRIMARY_PALE : WHITE,
+            shading: index % 2 === 1 ? theme.primaryPale : WHITE,
             verticalAlign: VerticalAlignTable.CENTER,
           }),
           cell([line(item.description, { size: 16 })], {
             width: widths[1],
-            shading: index % 2 === 1 ? PRIMARY_PALE : WHITE,
+            shading: index % 2 === 1 ? theme.primaryPale : WHITE,
             verticalAlign: VerticalAlignTable.CENTER,
           }),
           cell([line(item.sac, { size: 15, align: AlignmentType.CENTER })], {
             width: widths[2],
-            shading: index % 2 === 1 ? PRIMARY_PALE : WHITE,
+            shading: index % 2 === 1 ? theme.primaryPale : WHITE,
             verticalAlign: VerticalAlignTable.CENTER,
           }),
           cell(
@@ -420,7 +492,7 @@ function buildItemsTable(data: InvoiceDocumentData): Table {
             ],
             {
               width: widths[3],
-              shading: index % 2 === 1 ? PRIMARY_PALE : WHITE,
+              shading: index % 2 === 1 ? theme.primaryPale : WHITE,
               verticalAlign: VerticalAlignTable.CENTER,
             }
           ),
@@ -433,7 +505,7 @@ function buildItemsTable(data: InvoiceDocumentData): Table {
             ],
             {
               width: widths[4],
-              shading: index % 2 === 1 ? PRIMARY_PALE : WHITE,
+              shading: index % 2 === 1 ? theme.primaryPale : WHITE,
               verticalAlign: VerticalAlignTable.CENTER,
             }
           ),
@@ -446,13 +518,13 @@ function buildItemsTable(data: InvoiceDocumentData): Table {
             ],
             {
               width: widths[5],
-              shading: index % 2 === 1 ? PRIMARY_PALE : WHITE,
+              shading: index % 2 === 1 ? theme.primaryPale : WHITE,
               verticalAlign: VerticalAlignTable.CENTER,
             }
           ),
           cell([line(formatMoney(item.amount), { size: 15, align: AlignmentType.RIGHT })], {
             width: widths[6],
-            shading: index % 2 === 1 ? PRIMARY_PALE : WHITE,
+            shading: index % 2 === 1 ? theme.primaryPale : WHITE,
             verticalAlign: VerticalAlignTable.CENTER,
           }),
         ],
@@ -464,11 +536,11 @@ function buildItemsTable(data: InvoiceDocumentData): Table {
     children: [
       cell(
         [line('Taxable Value', { size: 16, bold: true, align: AlignmentType.RIGHT })],
-        { width: widths[0] + widths[1] + widths[2] + widths[3] + widths[4] + widths[5], columnSpan: 6, shading: PRIMARY_SOFT }
+        { width: widths[0] + widths[1] + widths[2] + widths[3] + widths[4] + widths[5], columnSpan: 6, shading: theme.primarySoft }
       ),
       cell(
         [line(formatMoney(data.subtotal), { size: 16, bold: true, align: AlignmentType.RIGHT })],
-        { width: widths[6], shading: PRIMARY_SOFT }
+        { width: widths[6], shading: theme.primarySoft }
       ),
     ],
   })
@@ -480,7 +552,7 @@ function buildItemsTable(data: InvoiceDocumentData): Table {
     rows: [
       new TableRow({
         tableHeader: true,
-        children: headers.map(([text, width, align]) => headerCell(text, width, align)),
+        children: headers.map(([text, width, align]) => headerCell(text, width, align, theme)),
       }),
       ...bodyRows,
       subtotalRow,
@@ -489,6 +561,7 @@ function buildItemsTable(data: InvoiceDocumentData): Table {
 }
 
 function buildTotals(data: InvoiceDocumentData): Table {
+  const theme = invoiceTheme(data.kind)
   const wordsWidth = 5200
   const labelWidth = 3200
   const amountWidth = CONTENT_WIDTH - wordsWidth - labelWidth
@@ -503,7 +576,7 @@ function buildTotals(data: InvoiceDocumentData): Table {
         children: [
           cell(
             [
-              label('Amount Chargeable (in words)', PRIMARY),
+              label('Amount Chargeable (in words)', theme.primary),
               line(data.amountInWords, { size: 17, bold: true, after: 90 }),
               label('Tax Amount (in words)'),
               line(data.taxInWords, { size: 15, color: MUTED }),
@@ -553,7 +626,7 @@ function buildTotals(data: InvoiceDocumentData): Table {
         children: [
           cell(
             [line('GRAND TOTAL', { size: 17, bold: true, color: WHITE })],
-            { width: labelWidth, shading: PRIMARY }
+            { width: labelWidth, shading: theme.primary }
           ),
           cell(
             [
@@ -564,7 +637,7 @@ function buildTotals(data: InvoiceDocumentData): Table {
                 align: AlignmentType.RIGHT,
               }),
             ],
-            { width: amountWidth, shading: PRIMARY }
+            { width: amountWidth, shading: theme.primary }
           ),
         ],
       }),
@@ -573,6 +646,7 @@ function buildTotals(data: InvoiceDocumentData): Table {
 }
 
 function buildGstSummary(data: InvoiceDocumentData): Table {
+  const theme = invoiceTheme(data.kind)
   const widths = [1100, 2000, 1300, 1600, 1300, 1600, 1566]
   const headers = [
     'HSN/SAC',
@@ -595,7 +669,8 @@ function buildGstSummary(data: InvoiceDocumentData): Table {
           headerCell(
             text,
             widths[index],
-            index === 0 ? AlignmentType.CENTER : AlignmentType.CENTER
+            index === 0 ? AlignmentType.CENTER : AlignmentType.CENTER,
+            theme
           )
         ),
       }),
@@ -630,25 +705,25 @@ function buildGstSummary(data: InvoiceDocumentData): Table {
         children: [
           cell([line('Total', { size: 15, bold: true })], {
             width: widths[0],
-            shading: PRIMARY_SOFT,
+            shading: theme.primarySoft,
           }),
           cell([line(formatMoney(data.subtotal), { size: 15, bold: true, align: AlignmentType.RIGHT })], {
             width: widths[1],
-            shading: PRIMARY_SOFT,
+            shading: theme.primarySoft,
           }),
-          cell([line('', { size: 15 })], { width: widths[2], shading: PRIMARY_SOFT }),
+          cell([line('', { size: 15 })], { width: widths[2], shading: theme.primarySoft }),
           cell([line(formatMoney(data.cgstAmount), { size: 15, bold: true, align: AlignmentType.RIGHT })], {
             width: widths[3],
-            shading: PRIMARY_SOFT,
+            shading: theme.primarySoft,
           }),
-          cell([line('', { size: 15 })], { width: widths[4], shading: PRIMARY_SOFT }),
+          cell([line('', { size: 15 })], { width: widths[4], shading: theme.primarySoft }),
           cell([line(formatMoney(data.sgstAmount), { size: 15, bold: true, align: AlignmentType.RIGHT })], {
             width: widths[5],
-            shading: PRIMARY_SOFT,
+            shading: theme.primarySoft,
           }),
           cell([line(formatMoney(data.taxTotal), { size: 15, bold: true, align: AlignmentType.RIGHT })], {
             width: widths[6],
-            shading: PRIMARY_SOFT,
+            shading: theme.primarySoft,
           }),
         ],
       }),
@@ -657,6 +732,8 @@ function buildGstSummary(data: InvoiceDocumentData): Table {
 }
 
 function buildFooterBlock(data: InvoiceDocumentData): Table {
+  const theme = invoiceTheme(data.kind)
+
   return new Table({
     width: { size: CONTENT_WIDTH, type: WidthType.DXA },
     layout: 'fixed',
@@ -667,7 +744,7 @@ function buildFooterBlock(data: InvoiceDocumentData): Table {
         children: [
           cell(
             [
-              line('Declaration', { size: 15, bold: true, color: PRIMARY, after: 30 }),
+              line('Declaration', { size: 15, bold: true, color: theme.primary, after: 30 }),
               line(data.declaration, { size: 14, color: MUTED }),
               new Paragraph({ spacing: { before: 300 } }),
               line("Customer's Seal and Signature", { size: 14, color: MUTED }),
@@ -680,7 +757,7 @@ function buildFooterBlock(data: InvoiceDocumentData): Table {
                 size: 15,
                 bold: true,
                 align: AlignmentType.RIGHT,
-                color: PRIMARY,
+                color: theme.primary,
               }),
               new Paragraph({ spacing: { before: 700 } }),
               line('Authorised Signatory', {
@@ -706,12 +783,13 @@ function formatQuantity(value: number): string {
 }
 
 export async function renderInvoiceDocx(data: InvoiceDocumentData): Promise<Buffer> {
+  const theme = invoiceTheme(data.kind)
   const children: Array<Paragraph | Table> = [
     buildLetterhead(data),
     new Paragraph({
       spacing: { before: 40, after: 160 },
       border: {
-        bottom: { style: BorderStyle.SINGLE, size: 18, color: '10B981', space: 1 },
+        bottom: { style: BorderStyle.SINGLE, size: 18, color: theme.accent, space: 1 },
       },
       children: [],
     }),

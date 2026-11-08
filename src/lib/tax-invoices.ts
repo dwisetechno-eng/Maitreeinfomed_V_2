@@ -16,6 +16,8 @@ export type TaxInvoiceRow = {
   status_code: string | null
   amount_paid?: number | null
   is_emailed?: boolean | null
+  po_number?: string | null
+  po_date?: string | null
   document_content?: string | null
   created_at: string | null
 }

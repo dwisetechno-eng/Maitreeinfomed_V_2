@@ -25,9 +25,10 @@ Next.js 16 (App Router, Turbopack) + Supabase app for scientific article request
 
 ## Invoice documents
 
-- Proforma invoices and tax invoices both download as Word (`.docx`) from the shared, coloured renderer in `src/lib/invoice-docx.ts` (`docx`), driven by the shared model in `src/lib/invoice-documents.ts`. No logo/image assets are embedded; keep the templates text-and-table only.
+- Proforma invoices and tax invoices both download as Word (`.docx`) from the shared renderer in `src/lib/invoice-docx.ts` (`docx`), driven by the shared model in `src/lib/invoice-documents.ts`. The proforma template uses a blue theme and the tax template the brand green, so the two are distinguishable at a glance.
+- The Maitree Infomed brand mark is `src/components/brand/brand-mark.tsx` (SVG used by the sidebar, login/reset screens and `src/app/icon.svg`). The Word letterhead embeds the generated PNG in `src/lib/maitree-logo.ts`; do not add other image assets, and regenerate that file if the SVG changes.
 - `src/actions/invoice-documents.ts` fetches the invoice, client, linked articles and proformas, renders the file and returns base64; the managers trigger the browser download.
-- Seller details, buyer USV address/GSTIN and service/PO defaults are hardcoded in `src/lib/invoice-documents.ts`; `clients.location`/`gstin` override the buyer values. Optional JSON in `document_content` overrides PO, attention, service text and dates.
+- Seller details, buyer USV address/GSTIN and service defaults are hardcoded in `src/lib/invoice-documents.ts`; `clients.location`/`gstin` override the buyer values. Tax invoices store `po_number`/`po_date` on `tax_invoices` and those override the template PO defaults. Optional JSON in `document_content` overrides attention, service text and dates.
 - Line items are one row per linked article request at SAC `998393`; an adjustment line reconciles the line total to the stored subtotal.
 
 ## Supabase schema
