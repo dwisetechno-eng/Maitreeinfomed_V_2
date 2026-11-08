@@ -7,7 +7,9 @@
     "build": "next build",
     "start": "next start",
     "create-admin": "node scripts/create-admin.mjs",
-    "deploy": "npm run build && git add . && git commit -m \"Update and deploy to Vercel\" && git push origin main"
+    "deploy": "npm run build && git add . && git commit -m \"Update and deploy\" && git push origin main",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.7",
@@ -21,10 +23,14 @@
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.3.4",
+    "@testing-library/jest-dom": "^6.6.3",
+    "@testing-library/react": "^16.1.0",
     "@types/node": "^24",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "jsdom": "^25.0.1",
     "tailwindcss": "^4.3.4",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^2.1.8"
   }
 }

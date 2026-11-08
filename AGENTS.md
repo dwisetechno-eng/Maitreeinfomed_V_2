@@ -56,6 +56,19 @@ Next.js 16 (App Router, Turbopack) + Supabase app for scientific article request
 - Production: `https://sci-article-hub.vercel.app` (deploys on push to `main`). No CI checks; verify the deployed UI manually.
 - On low-memory Windows hosts `npm run build` can OOM; `npx tsc --noEmit` still works and Vercel performs the real build.
 
+## Testing
+
+- `npm test` runs Vitest unit tests (`src/**/*.test.ts(x)`).
+- Tests live next to the code they cover (e.g. `src/lib/roles.test.ts`).
+- Pure logic (roles, invoice math, status derivation) is covered; DB/UI are not unit-tested. Add Playwright/Cypress for E2E if needed.
+
+## Security
+
+- See `SECURITY.md` for the full checklist.
+- RLS policies: `supabase/migrations/20261108170000_security_hardening_rls.sql`.
+- Security headers: `next.config.ts`.
+- Never commit `.env.local`; service role key is server-only.
+
 <!-- BEGIN:nextjs-agent-rules -->
 
 ## This is NOT the Next.js you know
