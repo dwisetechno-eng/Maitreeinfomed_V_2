@@ -77,7 +77,7 @@ export function Modal({
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
-        className={`relative z-10 flex max-h-[95dvh] w-full flex-col overflow-hidden rounded-t-2xl border border-slate-200 bg-white shadow-2xl shadow-slate-900/20 sm:max-h-[92vh] sm:rounded-2xl ${SIZE_CLASSES[size]}`}
+        className={`relative z-10 flex max-h-[95vh] w-full flex-col overflow-hidden rounded-t-2xl border border-slate-200 bg-white shadow-2xl shadow-slate-900/20 max-h-[95dvh] sm:max-h-[92vh] sm:rounded-2xl ${SIZE_CLASSES[size]}`}
       >
         <div className="shrink-0 border-b border-slate-200">
           <div className="flex items-start justify-between gap-4 px-5 py-4">
@@ -103,7 +103,7 @@ export function Modal({
 
         <div
           className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-4"
-          style={{ WebkitOverflowScrolling: 'touch' }}
+          style={{ WebkitOverflowScrolling: 'touch', touchAction: 'pan-y' }}
         >
           {children}
         </div>
