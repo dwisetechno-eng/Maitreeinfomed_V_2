@@ -8,9 +8,11 @@
 
 import type { ArticleRequestRow } from '@/lib/article-request-meta'
 import { buildInvoiceDocumentData } from '@/lib/invoice-documents'
-import { renderProformaDocx } from '@/lib/proforma-docx'
-import { renderTaxInvoicePdf } from '@/lib/tax-invoice-pdf'
+import { renderInvoiceDocx } from '@/lib/invoice-docx'
 import { createClient } from '@/utils/supabase/server'
+
+const DOCX_MIME_TYPE =
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
 
 export type InvoiceDocumentResult =
   | {
@@ -238,7 +240,7 @@ export async function downloadProformaDocument(
       documentContent: invoice.document_content,
     })
 
-    const buffer = await renderProformaDocx(data)
+    const buffer = await renderInvoiceDocx(data)
     const filename = `Proforma-Invoice-${safeFilenamePart(
       data.invoiceNumber,
       invoice.id.slice(0, 8)
@@ -248,8 +250,7 @@ export async function downloadProformaDocument(
       ok: true,
       base64: buffer.toString('base64'),
       filename,
-      mimeType:
-        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      mimeType: DOCX_MIME_TYPE,
     }
   } catch (error) {
     return {
@@ -259,8 +260,8 @@ export async function downloadProformaDocument(
   }
 }
 
-/** Render a tax invoice as a PDF. */
-export async function downloadTaxInvoicePdf(
+/** Render a tax invoice as a Word document. */
+export async function downloadTaxInvoiceDocument(
   invoiceId: string
 ): Promise<InvoiceDocumentResult> {
   try {
@@ -364,22 +365,22 @@ export async function downloadTaxInvoicePdf(
       linkedProformaNumbers: proformas.map((proforma) => proforma.pi_number),
     })
 
-    const bytes = await renderTaxInvoicePdf(data)
+    const buffer = await renderInvoiceDocx(data)
     const filename = `Tax-Invoice-${safeFilenamePart(
       data.invoiceNumber,
       invoice.id.slice(0, 8)
-    )}.pdf`
+    )}.docx`
 
     return {
       ok: true,
-      base64: Buffer.from(bytes).toString('base64'),
+      base64: buffer.toString('base64'),
       filename,
-      mimeType: 'application/pdf',
+      mimeType: DOCX_MIME_TYPE,
     }
   } catch (error) {
     return {
       ok: false,
-      error: errorMessage(error, 'Could not generate the tax invoice PDF.'),
+      error: errorMessage(error, 'Could not generate the tax invoice document.'),
     }
   }
 }

@@ -1,7 +1,7 @@
 /**
  * Shared document model for printable invoices.
  *
- * Both the Word proforma invoice and the PDF tax invoice are generated from
+ * Both the Word proforma invoice and the Word tax invoice are generated from
  * this model, so the two documents always show the same numbers. Seller/buyer
  * details that the app does not store yet are defined once here (taken from the
  * supplied templates); anything present in the database overrides them.
@@ -424,7 +424,7 @@ function parseOverrides(documentContent: string | null | undefined): DocumentOve
   }
 }
 
-/** Build the shared model consumed by the DOCX and PDF renderers. */
+/** Build the shared model consumed by the Word renderer. */
 export function buildInvoiceDocumentData(
   input: InvoiceDocumentInput
 ): InvoiceDocumentData {

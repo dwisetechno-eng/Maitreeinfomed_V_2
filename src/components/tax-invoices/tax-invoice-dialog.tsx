@@ -18,6 +18,10 @@ import {
 import { Alert } from '@/components/ui/alert'
 import { Modal } from '@/components/ui/modal'
 import { SpinnerIcon } from '@/components/ui/icons'
+import {
+  getArticleBatchTag,
+  type ArticleRequestRow,
+} from '@/lib/article-request-meta'
 import { isMissingColumnError } from '@/lib/supabase-errors'
 import {
   DEFAULT_TAX_RATE,
@@ -37,6 +41,12 @@ import {
 import { createClient } from '@/utils/supabase/client'
 
 type Source = 'manual' | 'proforma'
+
+/** Subset of `article_requests` needed to label a proforma with its batches. */
+type BatchArticleRow = Pick<
+  ArticleRequestRow,
+  'id' | 'proforma_invoice_id' | 'batch_id' | 'batch_tag' | 'notes'
+>
 
 type FormState = {
   tax_invoice_number: string
@@ -85,6 +95,8 @@ export function TaxInvoiceDialog({
   const [proformas, setProformas] = useState<ProformaForTaxInvoice[]>([])
   const [proformasLoading, setProformasLoading] = useState(false)
   const [proformasError, setProformasError] = useState<string | null>(null)
+  /** Distinct batch labels per proforma invoice id, loaded from the linked articles. */
+  const [proformaBatches, setProformaBatches] = useState<Record<string, string[]>>({})
   const [selectedProformaIds, setSelectedProformaIds] = useState<Set<string>>(new Set())
   const [refreshKey, setRefreshKey] = useState(0)
 
@@ -103,6 +115,7 @@ export function TaxInvoiceDialog({
     setSelectedProformaIds(new Set())
     setProformas([])
     setProformasError(null)
+    setProformaBatches({})
 
     if (invoice) {
       const subtotal = toNumber(invoice.subtotal)
@@ -146,15 +159,69 @@ export function TaxInvoiceDialog({
   useEffect(() => {
     if (!open || source !== 'proforma' || !form.client_id) {
       setProformas([])
+      setProformaBatches({})
       setProformasLoading(false)
       return
     }
 
     let cancelled = false
 
+    async function loadBatches(proformaIds: string[]) {
+      if (proformaIds.length === 0) {
+        return {}
+      }
+
+      const supabase = createClient()
+      const full = await supabase
+        .from('article_requests')
+        .select('id, proforma_invoice_id, batch_id, batch_tag, notes')
+        .in('proforma_invoice_id', proformaIds)
+
+      let articles: BatchArticleRow[] | null = full.error ? null : full.data
+
+      // Older schemas may not have the batch columns yet; the notes payload
+      // still carries the tag, so retry with just the required columns.
+      if (full.error && isMissingColumnError(full.error)) {
+        const fallback = await supabase
+          .from('article_requests')
+          .select('id, proforma_invoice_id, notes')
+          .in('proforma_invoice_id', proformaIds)
+
+        articles = fallback.error ? null : fallback.data
+      }
+
+      // Batch labels are a convenience: never fail the proforma list because
+      // the article rows could not be read.
+      if (!articles) {
+        return {}
+      }
+
+      const grouped = new Map<string, Set<string>>()
+
+      for (const article of articles) {
+        const proformaId = article.proforma_invoice_id
+        if (!proformaId) {
+          continue
+        }
+
+        const tag = getArticleBatchTag(article as ArticleRequestRow) ?? 'Unbatched'
+        const tags = grouped.get(proformaId) ?? new Set<string>()
+        tags.add(tag)
+        grouped.set(proformaId, tags)
+      }
+
+      return Object.fromEntries(
+        [...grouped].map(([proformaId, tags]) => [
+          proformaId,
+          [...tags].sort((a, b) => a.localeCompare(b)),
+        ])
+      )
+    }
+
     async function loadProformas() {
       setProformasLoading(true)
       setProformasError(null)
+      setProformaBatches({})
 
       try {
         const supabase = createClient()
@@ -174,18 +241,24 @@ export function TaxInvoiceDialog({
         }
 
         const rows = (data ?? []) as ProformaForTaxInvoice[]
-
-        setProformas(
-          rows.filter(
-            (proforma) =>
-              proforma.status_code !== 'CANCELLED' &&
-              proforma.status_code !== 'TAX_INVOICE_GENERATED' &&
-              !proforma.tax_invoice_id
-          )
+        const convertible = rows.filter(
+          (proforma) =>
+            proforma.status_code !== 'CANCELLED' &&
+            proforma.status_code !== 'TAX_INVOICE_GENERATED' &&
+            !proforma.tax_invoice_id
         )
+
+        setProformas(convertible)
+
+        const batches = await loadBatches(convertible.map((proforma) => proforma.id))
+
+        if (!cancelled) {
+          setProformaBatches(batches)
+        }
       } catch (loadError) {
         if (!cancelled) {
           setProformas([])
+          setProformaBatches({})
           setProformasError(
             getErrorMessage(loadError, 'Unable to load proforma invoices for this client.')
           )
@@ -721,6 +794,9 @@ export function TaxInvoiceDialog({
                           PI number
                         </th>
                         <th scope="col" className="px-3 py-2.5">
+                          Batch
+                        </th>
+                        <th scope="col" className="px-3 py-2.5">
                           Date
                         </th>
                         <th scope="col" className="px-3 py-2.5 text-right">
@@ -737,6 +813,7 @@ export function TaxInvoiceDialog({
                     <tbody className="divide-y divide-slate-100 bg-white">
                       {proformas.map((proforma) => {
                         const checked = selectedProformaIds.has(proforma.id)
+                        const batches = proformaBatches[proforma.id] ?? []
 
                         return (
                           <tr
@@ -755,6 +832,22 @@ export function TaxInvoiceDialog({
                             <td className="whitespace-nowrap px-3 py-2.5 font-mono text-xs font-medium text-slate-700">
                               {proforma.pi_number?.trim() ||
                                 proforma.id.slice(0, 8).toUpperCase()}
+                            </td>
+                            <td className="px-3 py-2.5">
+                              {batches.length === 0 ? (
+                                <span className="text-slate-400">—</span>
+                              ) : (
+                                <div className="flex flex-wrap gap-1">
+                                  {batches.map((batch) => (
+                                    <span
+                                      key={batch}
+                                      className="inline-flex whitespace-nowrap rounded-full bg-brand-50 px-2 py-0.5 text-[11px] font-medium text-brand-700 ring-1 ring-inset ring-brand-200"
+                                    >
+                                      {batch}
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
                             </td>
                             <td className="whitespace-nowrap px-3 py-2.5 text-slate-600">
                               {formatDate(proforma.pi_date ?? proforma.invoice_date)}

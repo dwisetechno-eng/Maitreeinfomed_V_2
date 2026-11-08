@@ -12,7 +12,7 @@ import {
   Trash2,
 } from 'lucide-react'
 
-import { downloadTaxInvoicePdf } from '@/actions/invoice-documents'
+import { downloadTaxInvoiceDocument } from '@/actions/invoice-documents'
 
 import {
   SUPABASE_SETUP_MESSAGE,
@@ -529,7 +529,7 @@ export function TaxInvoiceManager() {
     await loadData({ silent: true })
   }
 
-  async function handleDownloadPdf(invoice: InvoiceWithLinks) {
+  async function handleDownloadWord(invoice: InvoiceWithLinks) {
     if (downloadingId) {
       return
     }
@@ -538,7 +538,7 @@ export function TaxInvoiceManager() {
     setNotice(null)
 
     try {
-      const result = await downloadTaxInvoicePdf(invoice.id)
+      const result = await downloadTaxInvoiceDocument(invoice.id)
 
       if (!result.ok) {
         setNotice({ tone: 'error', message: result.error })
@@ -550,14 +550,14 @@ export function TaxInvoiceManager() {
         tone: 'success',
         message: `Downloaded ${
           invoice.tax_invoice_number?.trim() || 'the tax invoice'
-        } as a PDF.`,
+        } as a Word document.`,
       })
     } catch (downloadError) {
       setNotice({
         tone: 'error',
         message: getErrorMessage(
           downloadError,
-          'Could not generate the tax invoice PDF.'
+          'Could not generate the tax invoice document.'
         ),
       })
     } finally {
@@ -974,11 +974,11 @@ export function TaxInvoiceManager() {
                           <IconButton
                             label={`Download ${
                               invoice.tax_invoice_number ?? 'tax invoice'
-                            } as PDF`}
+                            } as Word`}
                             tooltipText={
                               downloadingId === invoice.id
-                                ? 'Generating PDF…'
-                                : 'Download PDF'
+                                ? 'Generating Word document…'
+                                : 'Download Word (.docx)'
                             }
                             tooltip="native"
                             variant="ghost"
@@ -991,7 +991,7 @@ export function TaxInvoiceManager() {
                               )
                             }
                             disabled={downloadingId !== null}
-                            onClick={() => void handleDownloadPdf(invoice)}
+                            onClick={() => void handleDownloadWord(invoice)}
                           />
                           <IconButton
                             label={`Edit ${invoice.tax_invoice_number ?? 'tax invoice'}`}
