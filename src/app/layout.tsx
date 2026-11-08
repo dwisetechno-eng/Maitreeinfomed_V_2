@@ -47,10 +47,28 @@ async function getCurrentUser(): Promise<AppUser | null> {
     const metadata = (user.user_metadata ?? {}) as Record<string, unknown>
     const appMetadata = (user.app_metadata ?? {}) as Record<string, unknown>
 
+    // Prefer the role stored in the `profiles` table (RBAC) when available.
+    let profileRole: string | null = null
+    try {
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('role, full_name')
+        .eq('id', user.id)
+        .maybeSingle()
+      const profileData = profile as { role?: string | null; full_name?: string | null } | null
+      profileRole = profileData?.role ?? null
+      if (profileData?.full_name?.trim()) {
+        metadata.full_name = profileData.full_name
+      }
+    } catch {
+      profileRole = null
+    }
+
     const role =
+      profileRole ||
       (typeof metadata.role === 'string' && metadata.role) ||
       (typeof appMetadata.role === 'string' && appMetadata.role) ||
-      'User'
+      'user'
 
     const name =
       (typeof metadata.full_name === 'string' && metadata.full_name) ||

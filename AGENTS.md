@@ -48,6 +48,7 @@ Next.js 16 (App Router, Turbopack) + Supabase app for scientific article request
 
 - Row/header actions use `src/components/ui/icon-button.tsx` (icon only, tooltip label, disabled reason in tooltip).
 - List screens deep-link via query params: article requests accept `status`, `client`, `department`, `billing`, `from`, `to`; proforma and tax invoices accept `status`. Dashboard KPI/pipeline links rely on these.
+- User management and role-based access: `src/app/masters/users` + `src/components/masters/user-manager.tsx` manage `profiles` (admin only). Roles are `admin`/`manager`/`user`, stored in `profiles.role` and mirrored into `app_metadata.role`. Creating/deleting auth accounts requires `SUPABASE_SERVICE_ROLE_KEY` on the server; without it the panel degrades to profile-only edits. Migration `20261108150000_profiles_rbac.sql` creates the table, RLS and the signup trigger.
 - Dashboard analytics re-fetches silently on window focus / visibility change so reversals from another route appear without a manual refresh.
 
 ## Verification

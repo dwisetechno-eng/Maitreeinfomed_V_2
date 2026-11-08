@@ -1,11 +1,12 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
   <rect x="3" y="3" width="58" height="58" rx="15" fill="#065F46" />
-  <polyline
-    points="16,44 22,20 32,36 42,20 48,44"
-    fill="none"
-    stroke="#FFFFFF"
-    stroke-width="4.5"
-    stroke-linecap="round"
-    stroke-linejoin="round"
-  />
+  <rect x="15" y="12" width="26" height="36" rx="3" fill="#FFFFFF" />
+  <path d="M33 12 L41 12 L41 20 Z" fill="#D1FAE5" />
+  <rect x="19" y="20" width="16" height="2.5" rx="1.25" fill="#065F46" />
+  <rect x="19" y="26" width="18" height="2.5" rx="1.25" fill="#065F46" />
+  <rect x="19" y="32" width="12" height="2.5" rx="1.25" fill="#065F46" />
+  <g transform="translate(37 40) rotate(-25)">
+    <rect x="0" y="0" width="20" height="9" rx="4.5" fill="#FFFFFF" />
+    <line x1="10" y1="1" x2="10" y2="8" stroke="#065F46" stroke-width="1.5" stroke-linecap="round" />
+  </g>
 </svg>

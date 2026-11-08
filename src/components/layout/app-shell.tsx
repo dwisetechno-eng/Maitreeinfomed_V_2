@@ -18,6 +18,7 @@ import {
   ReceiptText,
   Tags,
   Truck,
+  Users,
   Wallet,
   X,
   type LucideIcon,
@@ -89,7 +90,17 @@ export function AppShell({ user, children }: { user?: AppUser | null; children: 
     role: user?.role || DEFAULT_USER.role,
   }
 
-  const currentNav = ALL_NAV.find((item) => isActivePath(pathname, item.href))
+  const mastersNav: NavItem[] =
+    currentUser.role === 'admin'
+      ? [
+          ...MASTERS_NAV,
+          { label: 'Users', href: '/masters/users', icon: Users },
+        ]
+      : MASTERS_NAV
+
+  const allNav = [...TRANSACTIONAL_NAV, ...mastersNav]
+
+  const currentNav = allNav.find((item) => isActivePath(pathname, item.href))
 
   useEffect(() => {
     setMobileOpen(false)
@@ -188,7 +199,7 @@ export function AppShell({ user, children }: { user?: AppUser | null; children: 
           <p className="px-3 pb-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">
             Masters
           </p>
-          {MASTERS_NAV.map((item) => {
+          {mastersNav.map((item) => {
             const active = isActivePath(pathname, item.href)
             const Icon = item.icon
 
