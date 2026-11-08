@@ -45,12 +45,27 @@ async function getCurrentUserRole(): Promise<string | null> {
     if (!user) {
       return null
     }
-    const { data } = await supabase
+
+    // 1) Prefer the role stored in the profiles table (RBAC).
+    const { data: profile } = await supabase
       .from('profiles')
       .select('role')
       .eq('id', user.id)
       .maybeSingle()
-    return (data as { role?: string | null } | null)?.role ?? null
+    const profileRole = (profile as { role?: string | null } | null)?.role
+    if (profileRole) {
+      return profileRole.trim().toLowerCase()
+    }
+
+    // 2) Fall back to app_metadata / user_metadata so a promoted user can
+    //    still get in even if the profiles row is missing or blocked by RLS.
+    const appMetadata = (user.app_metadata ?? {}) as Record<string, unknown>
+    const userMetadata = (user.user_metadata ?? {}) as Record<string, unknown>
+    const metaRole =
+      (typeof appMetadata.role === 'string' && appMetadata.role) ||
+      (typeof userMetadata.role === 'string' && userMetadata.role) ||
+      null
+    return metaRole ? metaRole.trim().toLowerCase() : null
   } catch {
     return null
   }
@@ -61,7 +76,10 @@ export async function listAppUsers(): Promise<
 > {
   const role = await getCurrentUserRole()
   if (role !== 'admin') {
-    return { ok: false, error: 'Only administrators can manage users.' }
+    return {
+      ok: false,
+      error: `Only administrators can manage users (detected role: ${role ?? 'none'}).`,
+    }
   }
 
   const admin = getAdminClient()

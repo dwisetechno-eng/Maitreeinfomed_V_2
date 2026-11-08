@@ -97,7 +97,7 @@ export function UserManager() {
           .select('role')
           .eq('id', user.id)
           .maybeSingle()
-        setCurrentRole((profile as { role?: string | null } | null)?.role ?? null)
+        setCurrentRole((profile as { role?: string | null } | null)?.role?.trim().toLowerCase() ?? null)
       }
 
       const result = await listAppUsers()
