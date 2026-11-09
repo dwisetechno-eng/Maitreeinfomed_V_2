@@ -330,6 +330,11 @@ export function UserManager() {
                 <li className="text-slate-500">
                   Checked: {diagnostics.checkedNames.join(', ')}
                 </li>
+                <li className="text-slate-500">
+                  Deployment: {diagnostics.environment ?? 'local'}
+                  {diagnostics.branch ? ` · ${diagnostics.branch}` : ''}
+                  {diagnostics.commit ? ` · ${diagnostics.commit}` : ''}
+                </li>
                 {!diagnostics.available && (
                   <li className="text-slate-500">
                     Add the missing variable for the <strong>Production</strong> environment

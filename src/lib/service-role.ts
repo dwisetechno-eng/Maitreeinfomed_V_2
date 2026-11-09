@@ -51,6 +51,10 @@ export type ServiceRoleStatus = {
   checkedNames: string[]
   /** True when a service role key was resolved and can be used. */
   available: boolean
+  /** Vercel runtime identity, useful when debugging env mismatches. */
+  environment: string | null
+  branch: string | null
+  commit: string | null
 }
 
 /** Safe diagnostics for the admin UI. Returns names, never secret values. */
@@ -64,5 +68,8 @@ export function getServiceRoleStatus(): ServiceRoleStatus {
     keyFoundIn: [...keyFoundIn],
     checkedNames: [...SERVICE_ROLE_CANDIDATES],
     available: keyFoundIn.length > 0 && Boolean(getSupabaseUrl()),
+    environment: cleanEnvValue(process.env.VERCEL_ENV ?? process.env.NODE_ENV),
+    branch: cleanEnvValue(process.env.VERCEL_GIT_COMMIT_REF),
+    commit: cleanEnvValue(process.env.VERCEL_GIT_COMMIT_SHA)?.slice(0, 7) ?? null,
   }
 }
