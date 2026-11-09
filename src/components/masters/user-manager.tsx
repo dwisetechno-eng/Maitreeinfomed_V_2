@@ -144,6 +144,15 @@ export function UserManager() {
     }
   }, [serviceRoleMissing, runDiagnostics])
 
+  // Also probe on mount so the status is visible before anyone attempts a
+  // create (the action is admin-gated and only returns variable names).
+  useEffect(() => {
+    void runDiagnostics()
+  }, [runDiagnostics])
+
+  const showServiceRoleWarning =
+    serviceRoleMissing || (diagnostics ? !diagnostics.available : false)
+
   const filteredUsers = useMemo(() => {
     const term = query.trim().toLowerCase()
     if (!term) {
@@ -291,7 +300,7 @@ export function UserManager() {
         </Alert>
       )}
 
-      {serviceRoleMissing && (
+      {showServiceRoleWarning && (
         <Alert tone="error">
           <p>
             Creating or fully deleting users requires the server-side
