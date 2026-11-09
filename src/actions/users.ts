@@ -13,6 +13,13 @@
 import { createClient as createServerClient } from '@/utils/supabase/server'
 import { createClient as createBrowserClient } from '@supabase/supabase-js'
 
+import {
+  getServiceRoleKey,
+  getServiceRoleStatus,
+  getSupabaseUrl,
+  type ServiceRoleStatus,
+} from '@/lib/service-role'
+
 export type AppUserRow = {
   id: string
   email: string | null
@@ -26,8 +33,8 @@ export type UserActionResult =
   | { ok: false; error: string }
 
 function getAdminClient() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY
+  const url = getSupabaseUrl()
+  const key = getServiceRoleKey()
   if (!url || !key) {
     return null
   }
@@ -69,6 +76,25 @@ async function getCurrentUserRole(): Promise<string | null> {
   } catch {
     return null
   }
+}
+
+function missingServiceRoleMessage(status: ServiceRoleStatus): string {
+  if (!status.urlConfigured) {
+    return 'User creation requires NEXT_PUBLIC_SUPABASE_URL on the server. Add it under Settings → Environment Variables for Production, then redeploy.'
+  }
+  return `User creation requires SUPABASE_SERVICE_ROLE_KEY to be configured on the server (checked: ${status.checkedNames.join(
+    ', '
+  )}). Add it under Settings → Environment Variables for Production, then redeploy so the running build picks it up.`
+}
+
+export async function getUserAdminDiagnostics(): Promise<
+  { ok: true; status: ServiceRoleStatus } | { ok: false; error: string }
+> {
+  const role = await getCurrentUserRole()
+  if (role !== 'admin') {
+    return { ok: false, error: 'Only administrators can run the configuration check.' }
+  }
+  return { ok: true, status: getServiceRoleStatus() }
 }
 
 export async function listAppUsers(): Promise<
@@ -129,8 +155,7 @@ export async function createAppUser(input: {
   if (!admin) {
     return {
       ok: false,
-      error:
-        'User creation requires SUPABASE_SERVICE_ROLE_KEY to be configured on the server.',
+      error: missingServiceRoleMessage(getServiceRoleStatus()),
     }
   }
 

@@ -36,10 +36,12 @@ import {
 import {
   createAppUser,
   deleteAppUser,
+  getUserAdminDiagnostics,
   listAppUsers,
   updateAppUser,
   type AppUserRow,
 } from '@/actions/users'
+import type { ServiceRoleStatus } from '@/lib/service-role'
 
 type FormState = {
   email: string
@@ -65,6 +67,8 @@ export function UserManager() {
   const [error, setError] = useState<string | null>(null)
   const [accessDenied, setAccessDenied] = useState(false)
   const [serviceRoleMissing, setServiceRoleMissing] = useState(false)
+  const [diagnostics, setDiagnostics] = useState<ServiceRoleStatus | null>(null)
+  const [diagnosticsLoading, setDiagnosticsLoading] = useState(false)
 
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editing, setEditing] = useState<AppUserRow | null>(null)
@@ -118,9 +122,27 @@ export function UserManager() {
     }
   }, [])
 
+  const runDiagnostics = useCallback(async () => {
+    setDiagnosticsLoading(true)
+    try {
+      const result = await getUserAdminDiagnostics()
+      setDiagnostics(result.ok ? result.status : null)
+    } catch {
+      setDiagnostics(null)
+    } finally {
+      setDiagnosticsLoading(false)
+    }
+  }, [])
+
   useEffect(() => {
     void loadUsers()
   }, [loadUsers])
+
+  useEffect(() => {
+    if (serviceRoleMissing) {
+      void runDiagnostics()
+    }
+  }, [serviceRoleMissing, runDiagnostics])
 
   const filteredUsers = useMemo(() => {
     const term = query.trim().toLowerCase()
@@ -271,11 +293,56 @@ export function UserManager() {
 
       {serviceRoleMissing && (
         <Alert tone="error">
-          Creating or fully deleting users requires the server-side
-          <code className="mx-1 rounded bg-slate-100 px-1 py-0.5 text-xs">
-            SUPABASE_SERVICE_ROLE_KEY
-          </code>
-          environment variable. Set it in your deployment to enable these actions.
+          <p>
+            Creating or fully deleting users requires the server-side
+            <code className="mx-1 rounded bg-slate-100 px-1 py-0.5 text-xs">
+              SUPABASE_SERVICE_ROLE_KEY
+            </code>
+            environment variable.
+          </p>
+
+          <div className="mt-3 rounded-lg border border-red-200 bg-white/70 px-3 py-2 text-xs text-slate-700">
+            {diagnosticsLoading ? (
+              <p>Checking what the server can see…</p>
+            ) : diagnostics ? (
+              <ul className="space-y-1">
+                <li>
+                  Supabase URL:{' '}
+                  <strong>{diagnostics.urlConfigured ? 'configured' : 'missing'}</strong>
+                </li>
+                <li>
+                  Service role key:{' '}
+                  <strong>
+                    {diagnostics.keyFoundIn.length > 0
+                      ? `found (${diagnostics.keyFoundIn.join(', ')})`
+                      : 'not found'}
+                  </strong>
+                </li>
+                <li className="text-slate-500">
+                  Checked: {diagnostics.checkedNames.join(', ')}
+                </li>
+                {!diagnostics.available && (
+                  <li className="text-slate-500">
+                    Add the missing variable for the <strong>Production</strong> environment
+                    in Vercel, then redeploy — environment changes only apply to new
+                    deployments.
+                  </li>
+                )}
+              </ul>
+            ) : (
+              <p>Configuration check unavailable.</p>
+            )}
+          </div>
+
+          <button
+            type="button"
+            onClick={() => void runDiagnostics()}
+            disabled={diagnosticsLoading}
+            className={`${secondaryButtonClass} mt-3`}
+          >
+            <RefreshIcon className="h-4 w-4" />
+            {diagnosticsLoading ? 'Checking…' : 'Run configuration check'}
+          </button>
         </Alert>
       )}
 
