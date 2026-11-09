@@ -77,7 +77,8 @@ export function Modal({
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
-        className={`relative z-10 flex max-h-[95vh] w-full flex-col overflow-hidden rounded-t-2xl border border-slate-200 bg-white shadow-2xl shadow-slate-900/20 max-h-[95dvh] sm:max-h-[92vh] sm:rounded-2xl ${SIZE_CLASSES[size]}`}
+        className={`relative z-10 block h-[100dvh] w-full overflow-y-auto overscroll-contain border border-slate-200 bg-white shadow-2xl shadow-slate-900/20 sm:flex sm:h-auto sm:max-h-[92vh] sm:flex-col sm:overflow-hidden sm:rounded-2xl ${SIZE_CLASSES[size]}`}
+        style={{ WebkitOverflowScrolling: 'touch' }}
       >
         <div className="shrink-0 border-b border-slate-200">
           <div className="flex items-start justify-between gap-4 px-5 py-4">
@@ -101,10 +102,10 @@ export function Modal({
           {headerContent && <div className="px-5 pb-4">{headerContent}</div>}
         </div>
 
-        <div
-          className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-4"
-          style={{ WebkitOverflowScrolling: 'touch', touchAction: 'pan-y' }}
-        >
+        {/* Mobile: the whole dialog scrolls as one surface (no nested scroll
+            areas, so touch gestures are never trapped). Desktop: only the body
+            scrolls while the header and footer stay pinned. */}
+        <div className="px-5 py-4 sm:min-h-0 sm:flex-1 sm:overflow-y-auto sm:overscroll-contain">
           {children}
         </div>
 

@@ -864,7 +864,7 @@ export function CreateProformaDialog({ open, onClose, onCreated }: CreateProform
                 </button>
               </div>
 
-              <div className="max-h-[60vh] overflow-auto overscroll-contain sm:max-h-[42vh]" style={{ WebkitOverflowScrolling: 'touch', touchAction: 'pan-y' }}>
+              <div className="overflow-x-auto sm:max-h-[42vh] sm:overflow-auto sm:overscroll-contain">
                 <table className="min-w-full divide-y divide-slate-200 text-sm">
                   <caption className="sr-only">Pending unbilled article requests</caption>
                   <thead className="sticky top-0 z-10 bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
@@ -1026,7 +1026,7 @@ export function CreateProformaDialog({ open, onClose, onCreated }: CreateProform
                     </p>
                     <p className="text-xs text-slate-500">{formatCurrency(selectedBatch.total)}</p>
                   </div>
-                  <div className="max-h-[55vh] overflow-auto overscroll-contain sm:max-h-[36vh]" style={{ WebkitOverflowScrolling: 'touch', touchAction: 'pan-y' }}>
+                  <div className="overflow-x-auto sm:max-h-[36vh] sm:overflow-auto sm:overscroll-contain">
                     <table className="min-w-full divide-y divide-slate-200 text-sm">
                       <caption className="sr-only">Selected batch article requests</caption>
                       <thead className="sticky top-0 z-10 bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
