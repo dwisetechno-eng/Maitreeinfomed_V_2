@@ -233,7 +233,7 @@ function buildLetterhead(data: InvoiceDocumentData): Table {
           cell(
             [
               line(seller.name, { size: 34, bold: true, color: WHITE, after: 40 }),
-              line('SCIENTIFIC ARTICLE PROCUREMENT', {
+              line('MEDICAL SCIENTIFIC SERVICES', {
                 size: 12,
                 bold: true,
                 color: theme.headerAccent,
@@ -397,7 +397,9 @@ function buildOrderDetails(data: InvoiceDocumentData): Table {
           ),
           cell(
             [
-              label('Purchase Articles Of'),
+              label(
+                data.kind === 'TAX' && data.notes ? 'Notes / Remark' : 'Purchase Articles Of'
+              ),
               line(data.purchaseArticlesLine, { size: 17 }),
               ...(data.kind === 'TAX'
                 ? [line(`Delivery Date - ${data.deliveryDateLabel}`, {

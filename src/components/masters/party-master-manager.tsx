@@ -40,6 +40,8 @@ type PartyConfig = {
   nameLabel: string
   namePlaceholder: string
   hasContactPerson: boolean
+  /** Clients carry a structured billing address used on invoice documents. */
+  hasAddress: boolean
 }
 
 const PARTY_CONFIG: Record<PartyKind, PartyConfig> = {
@@ -53,6 +55,7 @@ const PARTY_CONFIG: Record<PartyKind, PartyConfig> = {
     nameLabel: 'Company name',
     namePlaceholder: 'e.g. Maitree Research Pvt. Ltd.',
     hasContactPerson: false,
+    hasAddress: true,
   },
   vendors: {
     table: 'vendors',
@@ -64,6 +67,7 @@ const PARTY_CONFIG: Record<PartyKind, PartyConfig> = {
     nameLabel: 'Vendor name',
     namePlaceholder: 'e.g. Sharma Scientific Supplies',
     hasContactPerson: true,
+    hasAddress: false,
   },
 }
 
@@ -75,6 +79,9 @@ type PartyRow = {
   email: string | null
   phone: string | null
   gstin: string | null
+  address?: string | null
+  city?: string | null
+  state?: string | null
   created_at: string | null
 }
 
@@ -84,6 +91,9 @@ type PartyFormState = {
   email: string
   phone: string
   gstin: string
+  address: string
+  city: string
+  state: string
 }
 
 type DialogState = { mode: 'create' } | { mode: 'edit'; row: PartyRow }
@@ -94,6 +104,9 @@ const EMPTY_FORM: PartyFormState = {
   email: '',
   phone: '',
   gstin: '',
+  address: '',
+  city: '',
+  state: '',
 }
 
 export function PartyMasterManager({ kind }: { kind: PartyKind }) {
@@ -168,6 +181,9 @@ export function PartyMasterManager({ kind }: { kind: PartyKind }) {
         row.email ?? '',
         row.phone ?? '',
         row.gstin ?? '',
+        row.address ?? '',
+        row.city ?? '',
+        row.state ?? '',
       ]
         .join(' ')
         .toLowerCase()
@@ -193,6 +209,9 @@ export function PartyMasterManager({ kind }: { kind: PartyKind }) {
       email: row.email ?? '',
       phone: row.phone ?? '',
       gstin: row.gstin ?? '',
+      address: row.address ?? '',
+      city: row.city ?? '',
+      state: row.state ?? '',
     })
     setFormError(null)
     setDialog({ mode: 'edit', row })
@@ -233,6 +252,12 @@ export function PartyMasterManager({ kind }: { kind: PartyKind }) {
 
     if (config.hasContactPerson) {
       payload.contact_person = form.contact_person.trim() || null
+    }
+
+    if (config.hasAddress) {
+      payload.address = form.address.trim() || null
+      payload.city = form.city.trim() || null
+      payload.state = form.state.trim() || null
     }
 
     try {
@@ -377,7 +402,9 @@ export function PartyMasterManager({ kind }: { kind: PartyKind }) {
         )}
 
         {loading ? (
-          <PartyTableSkeleton columns={config.hasContactPerson ? 7 : 6} />
+          <PartyTableSkeleton
+            columns={6 + (config.hasContactPerson ? 1 : 0) + (config.hasAddress ? 1 : 0)}
+          />
         ) : loadError && rows.length === 0 ? (
           <div className="px-6 py-12 text-center">
             <p className="text-sm font-semibold text-red-700">Could not load {config.title.toLowerCase()}</p>
@@ -417,6 +444,11 @@ export function PartyMasterManager({ kind }: { kind: PartyKind }) {
                       Contact person
                     </th>
                   )}
+                  {config.hasAddress && (
+                    <th scope="col" className="px-4 py-3">
+                      Address
+                    </th>
+                  )}
                   <th scope="col" className="px-4 py-3">
                     Email
                   </th>
@@ -444,6 +476,11 @@ export function PartyMasterManager({ kind }: { kind: PartyKind }) {
                       {config.hasContactPerson && (
                         <td className="px-4 py-3 text-slate-600">
                           {row.contact_person || '—'}
+                        </td>
+                      )}
+                      {config.hasAddress && (
+                        <td className="max-w-[16rem] px-4 py-3 text-slate-600">
+                          {formatAddress(row) || '—'}
                         </td>
                       )}
                       <td className="px-4 py-3 text-slate-600">
@@ -553,6 +590,53 @@ export function PartyMasterManager({ kind }: { kind: PartyKind }) {
               </div>
             )}
 
+            {config.hasAddress && (
+              <>
+                <div className="sm:col-span-2">
+                  <label htmlFor="party-address" className={labelClass}>
+                    Address
+                  </label>
+                  <textarea
+                    id="party-address"
+                    value={form.address}
+                    onChange={(event) => updateForm('address', event.target.value)}
+                    rows={2}
+                    maxLength={300}
+                    placeholder="Street, building, area"
+                    className={`${inputClass} resize-y`}
+                  />
+                </div>
+
+                <div>
+                  <label htmlFor="party-city" className={labelClass}>
+                    City
+                  </label>
+                  <input
+                    id="party-city"
+                    value={form.city}
+                    onChange={(event) => updateForm('city', event.target.value)}
+                    maxLength={120}
+                    placeholder="e.g. Thane"
+                    className={inputClass}
+                  />
+                </div>
+
+                <div>
+                  <label htmlFor="party-state" className={labelClass}>
+                    State
+                  </label>
+                  <input
+                    id="party-state"
+                    value={form.state}
+                    onChange={(event) => updateForm('state', event.target.value)}
+                    maxLength={120}
+                    placeholder="e.g. Maharashtra"
+                    className={inputClass}
+                  />
+                </div>
+              </>
+            )}
+
             <div>
               <label htmlFor="party-email" className={labelClass}>
                 Email
@@ -642,6 +726,13 @@ export function PartyMasterManager({ kind }: { kind: PartyKind }) {
 
 function getPartyName(row: PartyRow, nameField: PartyConfig['nameField']) {
   return (nameField === 'company_name' ? row.company_name : row.vendor_name) ?? ''
+}
+
+function formatAddress(row: PartyRow): string {
+  return [row.address, row.city, row.state]
+    .map((value) => value?.trim() ?? '')
+    .filter(Boolean)
+    .join(', ')
 }
 
 function PartyTableSkeleton({ columns }: { columns: number }) {

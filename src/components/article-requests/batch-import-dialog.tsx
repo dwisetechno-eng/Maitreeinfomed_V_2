@@ -24,7 +24,12 @@ import { Modal } from '@/components/ui/modal'
 
 type ClientOption = { id: string; company_name: string }
 type DepartmentOption = { id: string; department_name: string; client_id: string | null }
-type ContactOption = { id: string; client_id: string | null; contact_name: string }
+type ContactOption = {
+  id: string
+  client_id: string | null
+  department_id: string | null
+  contact_name: string
+}
 
 type ImportedBatch = Extract<ImportResult, { ok: true }>
 
@@ -77,10 +82,23 @@ export function BatchImportDialog({
     [clientId, departments]
   )
 
-  const clientContacts = useMemo(
-    () => (clientId ? contacts.filter((item) => item.client_id === clientId) : []),
-    [clientId, contacts]
-  )
+  const clientContacts = useMemo(() => {
+    if (!clientId) {
+      return []
+    }
+
+    return contacts.filter((item) => {
+      if (item.client_id !== clientId) {
+        return false
+      }
+
+      if (departmentId) {
+        return !item.department_id || item.department_id === departmentId
+      }
+
+      return true
+    })
+  }, [clientId, contacts, departmentId])
 
   const closeDialog = useCallback(() => {
     if (!importing) {
@@ -92,6 +110,29 @@ export function BatchImportDialog({
     setClientId(nextClientId)
     setDepartmentId('')
     setContactId('')
+    setError(null)
+  }
+
+  function handleDepartmentChange(nextDepartmentId: string) {
+    setDepartmentId(nextDepartmentId)
+    setContactId((current) => {
+      if (!current) {
+        return current
+      }
+
+      const contact = contacts.find((item) => item.id === current)
+
+      if (
+        !contact ||
+        (nextDepartmentId &&
+          contact.department_id &&
+          contact.department_id !== nextDepartmentId)
+      ) {
+        return ''
+      }
+
+      return current
+    })
     setError(null)
   }
 
@@ -280,7 +321,7 @@ export function BatchImportDialog({
             <select
               id="batch-department"
               value={departmentId}
-              onChange={(event) => setDepartmentId(event.target.value)}
+              onChange={(event) => handleDepartmentChange(event.target.value)}
               disabled={!clientId || importing || clientDepartments.length === 0}
               className={inputClass}
             >
@@ -314,7 +355,7 @@ export function BatchImportDialog({
                 {!clientId
                   ? 'Select a client first'
                   : clientContacts.length === 0
-                    ? 'No contacts for this client'
+                    ? 'No contacts for this department'
                     : 'No contact'}
               </option>
               {clientContacts.map((contact) => (

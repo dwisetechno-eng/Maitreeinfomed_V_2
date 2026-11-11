@@ -54,6 +54,7 @@ type FormState = {
   client_id: string
   po_number: string
   po_date: string
+  notes: string
   subtotal: string
   tax_rate: string
   status_code: string
@@ -77,6 +78,7 @@ const EMPTY_FORM: FormState = {
   client_id: '',
   po_number: '',
   po_date: '',
+  notes: '',
   subtotal: '',
   tax_rate: String(DEFAULT_TAX_RATE),
   status_code: 'UNPAID',
@@ -135,6 +137,7 @@ export function TaxInvoiceDialog({
         client_id: invoice.client_id ?? '',
         po_number: invoice.po_number ?? '',
         po_date: (invoice.po_date ?? '').slice(0, 10),
+        notes: invoice.notes ?? '',
         subtotal: String(subtotal),
         tax_rate: String(derivedRate),
         status_code: invoice.status_code ?? 'UNPAID',
@@ -404,6 +407,7 @@ export function TaxInvoiceDialog({
       invoice_date: form.tax_invoice_date,
       po_number: form.po_number.trim() || null,
       po_date: form.po_date || null,
+      notes: form.notes.trim() || null,
       subtotal: roundMoney(subtotal),
       tax_total: roundMoney(taxTotal),
       grand_total: roundMoney(grandTotal),
@@ -426,6 +430,7 @@ export function TaxInvoiceDialog({
           const legacyPayload: Record<string, unknown> = { ...payload }
           delete legacyPayload.po_number
           delete legacyPayload.po_date
+          delete legacyPayload.notes
 
           const { error: legacyError } = await supabase
             .from('tax_invoices')
@@ -478,6 +483,7 @@ export function TaxInvoiceDialog({
         const legacyPayload: Record<string, unknown> = { ...payload, amount_paid: 0 }
         delete legacyPayload.po_number
         delete legacyPayload.po_date
+        delete legacyPayload.notes
 
         const retry = await supabase
           .from('tax_invoices')
@@ -811,6 +817,25 @@ export function TaxInvoiceDialog({
           Printed on the tax invoice as the buyer&apos;s order number and date. Leave blank to use
           the template default.
         </p>
+
+        <div>
+          <label htmlFor="tax-notes" className={labelClass}>
+            Notes / remark
+          </label>
+          <textarea
+            id="tax-notes"
+            value={form.notes}
+            onChange={(event) => updateForm('notes', event.target.value)}
+            rows={3}
+            maxLength={500}
+            placeholder="e.g. Purchase Articles Of Sep-26 (As Per Estimate : PI-202609-0001)"
+            className={`${inputClass} resize-y`}
+          />
+          <p className="mt-1 text-xs text-slate-500">
+            Printed in the Purchase Articles block of the Word tax invoice. Leave blank to use the
+            generated month and estimate numbers.
+          </p>
+        </div>
 
         {useProformaSource ? (
           <div className="space-y-3">

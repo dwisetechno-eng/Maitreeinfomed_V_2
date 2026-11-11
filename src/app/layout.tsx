@@ -15,8 +15,8 @@ const inter = Inter({
 
 export const metadata: Metadata = {
   title: {
-    default: 'Maitree Infomed Scientific Hub',
-    template: '%s | Maitree Infomed Scientific Hub',
+    default: 'Maitree Infomed Medical Scientific Services',
+    template: '%s | Maitree Infomed Medical Scientific Services',
   },
   description:
     'Track scientific article requests, proforma invoices and tax invoices for Maitree Infomed.',

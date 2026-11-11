@@ -1,4 +1,4 @@
-# Security notes for Maitree Infomed Scientific Hub
+# Security notes for Maitree Infomed Medical Scientific Services
 
 ## Authentication & authorization
 - Supabase Auth (email/password) gates the workspace via `src/proxy.ts`.

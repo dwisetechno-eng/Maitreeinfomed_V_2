@@ -40,8 +40,17 @@ import {
 import { createClient } from '@/utils/supabase/client'
 
 type ClientOption = { id: string; company_name: string }
-type DepartmentOption = { id: string; department_name: string }
-type ContactOption = { id: string; contact_name: string; email: string | null }
+type DepartmentOption = {
+  id: string
+  department_name: string
+  client_id: string | null
+}
+type ContactOption = {
+  id: string
+  contact_name: string
+  email: string | null
+  department_id: string | null
+}
 type VendorOption = { id: string; vendor_name: string }
 
 type SelectionMode = 'individual' | 'batch'
@@ -177,7 +186,10 @@ export function CreateProformaDialog({ open, onClose, onCreated }: CreateProform
 
         const [clientsResult, departmentsResult, vendorsResult, statusResult] = await Promise.all([
           supabase.from('clients').select('id, company_name').order('company_name'),
-          supabase.from('departments').select('id, department_name').order('department_name'),
+          supabase
+            .from('departments')
+            .select('id, department_name, client_id')
+            .order('department_name'),
           supabase.from('vendors').select('id, vendor_name').order('vendor_name'),
           supabase
             .from('proforma_status_master')
@@ -242,7 +254,7 @@ export function CreateProformaDialog({ open, onClose, onCreated }: CreateProform
         const supabase = createClient()
         const { data, error } = await supabase
           .from('client_contacts')
-          .select('id, contact_name, email')
+          .select('id, contact_name, email, department_id')
           .eq('client_id', selectedClientId)
           .order('contact_name', { ascending: true })
 
@@ -327,13 +339,47 @@ export function CreateProformaDialog({ open, onClose, onCreated }: CreateProform
     }
   }, [open, selectedClientId, pendingRefresh])
 
+  // Departments and contacts are dependent on the selected client; contacts
+  // then narrow to the chosen department (unassigned contacts stay available).
+  const clientDepartments = useMemo(
+    () =>
+      selectedClientId
+        ? departments.filter((department) => department.client_id === selectedClientId)
+        : [],
+    [departments, selectedClientId]
+  )
+
+  const clientContacts = useMemo(() => {
+    return contacts.filter((contact) => {
+      if (selectedDepartmentId) {
+        return (
+          !contact.department_id || contact.department_id === selectedDepartmentId
+        )
+      }
+
+      return true
+    })
+  }, [contacts, selectedDepartmentId])
+
   // Clear the selection when the client changes.
   useEffect(() => {
     setSelectedIds(new Set())
     setSelectedBatchKey('')
+    setSelectedDepartmentId('')
     setSelectedContactId('')
     setGenerateError(null)
   }, [selectedClientId])
+
+  // Drop a contact that no longer belongs to the chosen department.
+  useEffect(() => {
+    if (!selectedContactId) {
+      return
+    }
+
+    if (!clientContacts.some((contact) => contact.id === selectedContactId)) {
+      setSelectedContactId('')
+    }
+  }, [clientContacts, selectedContactId])
 
   const selectedRows = useMemo(
     () => pendingRows.filter((row) => selectedIds.has(row.id)),
@@ -599,8 +645,14 @@ export function CreateProformaDialog({ open, onClose, onCreated }: CreateProform
                 disabled={!selectedClientId || referenceLoading || generating}
                 className={inputClass}
               >
-                <option value="">No department</option>
-                {departments.map((department) => (
+                <option value="">
+                  {!selectedClientId
+                    ? 'Select a client first'
+                    : clientDepartments.length === 0
+                      ? 'No departments for this client'
+                      : 'No department'}
+                </option>
+                {clientDepartments.map((department) => (
                   <option key={department.id} value={department.id}>
                     {department.department_name}
                   </option>
@@ -620,9 +672,15 @@ export function CreateProformaDialog({ open, onClose, onCreated }: CreateProform
                 className={inputClass}
               >
                 <option value="">
-                  {contactsLoading ? 'Loading contacts…' : 'No contact person'}
+                  {contactsLoading
+                    ? 'Loading contacts…'
+                    : !selectedClientId
+                      ? 'Select a client first'
+                      : clientContacts.length === 0
+                        ? 'No contacts for this department'
+                        : 'No contact person'}
                 </option>
-                {contacts.map((contact) => (
+                {clientContacts.map((contact) => (
                   <option key={contact.id} value={contact.id}>
                     {contact.contact_name}
                     {contact.email ? ` — ${contact.email}` : ''}

@@ -152,7 +152,7 @@ export function AppShell({ user, children }: { user?: AppUser | null; children: 
               Maitree Infomed
             </span>
             <span className="text-[10px] font-semibold uppercase tracking-[0.18em] text-brand-700">
-              Scientific Hub
+              Medical Scientific Services
             </span>
           </span>
         </Link>
@@ -272,7 +272,7 @@ export function AppShell({ user, children }: { user?: AppUser | null; children: 
               Maitree Infomed
             </p>
             <h2 className="truncate text-sm font-semibold text-slate-900">
-              {currentNav?.label ?? 'Scientific Hub'}
+              {currentNav?.label ?? 'Medical Scientific Services'}
             </h2>
           </div>
 
@@ -299,7 +299,7 @@ export function AppShell({ user, children }: { user?: AppUser | null; children: 
         <footer className="border-t border-slate-200 bg-white">
           <div className="mx-auto flex max-w-7xl flex-col gap-1 px-4 py-4 text-xs text-slate-500 sm:flex-row sm:items-center sm:justify-between sm:px-6 lg:px-8">
             <p>© {new Date().getFullYear()} Maitree Infomed. All rights reserved.</p>
-            <p>Scientific Hub</p>
+            <p>Medical Scientific Services</p>
           </div>
         </footer>
       </div>

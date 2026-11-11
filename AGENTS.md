@@ -1,4 +1,4 @@
-# Maitree Infomed Scientific Hub
+# Maitree Infomed Medical Scientific Services
 
 Next.js 16 (App Router, Turbopack) + Supabase app for scientific article requests, proforma invoices, tax invoices and payment receipts. Single app, no monorepo, no test suite or lint config. `npm run build` runs the TypeScript check.
 

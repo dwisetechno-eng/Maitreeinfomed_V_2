@@ -200,7 +200,7 @@ export default function LoginPage() {
                 Maitree Infomed
               </p>
               <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-brand-700">
-                Scientific Hub
+                Medical Scientific Services
               </p>
             </div>
           </div>
@@ -400,7 +400,7 @@ export default function LoginPage() {
       <footer className="border-t border-slate-200 bg-white">
         <div className="mx-auto flex max-w-7xl flex-col gap-1 px-4 py-4 text-xs text-slate-500 sm:flex-row sm:items-center sm:justify-between sm:px-6 lg:px-8">
           <p>© {new Date().getFullYear()} Maitree Infomed. All rights reserved.</p>
-          <p>Scientific Hub</p>
+          <p>Medical Scientific Services</p>
         </div>
       </footer>
     </div>

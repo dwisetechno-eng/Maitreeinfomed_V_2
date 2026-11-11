@@ -18,6 +18,7 @@ export type TaxInvoiceRow = {
   is_emailed?: boolean | null
   po_number?: string | null
   po_date?: string | null
+  notes?: string | null
   document_content?: string | null
   created_at: string | null
 }

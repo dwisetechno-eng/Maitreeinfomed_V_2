@@ -53,7 +53,12 @@ import { createClient } from '@/utils/supabase/client'
 type ClientRow = { id: string; company_name: string }
 type DepartmentRow = { id: string; department_name: string; client_id: string | null }
 type VendorRow = { id: string; vendor_name: string }
-type ContactRow = { id: string; client_id: string | null; contact_name: string }
+type ContactRow = {
+  id: string
+  client_id: string | null
+  department_id: string | null
+  contact_name: string
+}
 type StatusRow = { status_code: string; status_label: string; display_order: number | null }
 type ProformaInfoRow = { id: string; pi_number: string | null; status_code: string | null }
 type TaxInfoRow = { id: string; tax_invoice_number: string | null; status_code: string | null }
@@ -186,6 +191,10 @@ export function ArticleRequestManager() {
   const [deleteError, setDeleteError] = useState<string | null>(null)
   const [deleting, setDeleting] = useState(false)
 
+  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false)
+  const [bulkDeleteError, setBulkDeleteError] = useState<string | null>(null)
+  const [bulkDeleting, setBulkDeleting] = useState(false)
+
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [assignOpen, setAssignOpen] = useState(false)
   const [importOpen, setImportOpen] = useState(false)
@@ -307,7 +316,7 @@ export function ArticleRequestManager() {
         supabase.from('vendors').select('id, vendor_name').order('vendor_name', { ascending: true }),
         supabase
           .from('client_contacts')
-          .select('id, client_id, contact_name')
+          .select('id, client_id, department_id, contact_name')
           .order('contact_name', { ascending: true }),
         supabase
           .from('article_status_master')
@@ -391,8 +400,20 @@ export function ArticleRequestManager() {
       return []
     }
 
-    return contacts.filter((contact) => contact.client_id === form.client_id)
-  }, [contacts, form.client_id])
+    return contacts.filter((contact) => {
+      if (contact.client_id !== form.client_id) {
+        return false
+      }
+
+      // Contacts without a department stay available as generic client
+      // contacts; once a department is chosen only that department is listed.
+      if (form.department_id) {
+        return !contact.department_id || contact.department_id === form.department_id
+      }
+
+      return true
+    })
+  }, [contacts, form.client_id, form.department_id])
 
   const filteredArticles = useMemo(() => {
     const term = query.trim().toLowerCase()
@@ -674,13 +695,40 @@ export function ArticleRequestManager() {
   function handleClientChange(clientId: string) {
     setForm((current) => {
       const department = departments.find((item) => item.id === current.department_id)
+      const keepDepartment = Boolean(department && department.client_id === clientId)
       const contact = contacts.find((item) => item.id === current.contact_id)
+      const keepContact = Boolean(
+        contact &&
+          contact.client_id === clientId &&
+          (!keepDepartment ||
+            !contact.department_id ||
+            contact.department_id === current.department_id)
+      )
 
       return {
         ...current,
         client_id: clientId,
-        department_id: department?.client_id === clientId ? current.department_id : '',
-        contact_id: contact?.client_id === clientId ? current.contact_id : '',
+        department_id: keepDepartment ? current.department_id : '',
+        contact_id: keepContact ? current.contact_id : '',
+      }
+    })
+  }
+
+  function handleDepartmentChange(departmentId: string) {
+    setForm((current) => {
+      const contact = contacts.find((item) => item.id === current.contact_id)
+      const keepContact = Boolean(
+        contact &&
+          contact.client_id === current.client_id &&
+          (!departmentId ||
+            !contact.department_id ||
+            contact.department_id === departmentId)
+      )
+
+      return {
+        ...current,
+        department_id: departmentId,
+        contact_id: keepContact ? current.contact_id : '',
       }
     })
   }
@@ -877,6 +925,46 @@ export function ArticleRequestManager() {
       setDeleteError(getErrorMessage(error, 'Unable to delete the article request.'))
     } finally {
       setDeleting(false)
+    }
+  }
+
+  async function handleBulkDelete() {
+    const ids = selectedArticles.map((article) => article.id)
+
+    if (ids.length === 0) {
+      setBulkDeleteOpen(false)
+      return
+    }
+
+    if (!hasSupabaseEnv()) {
+      setBulkDeleteError(SUPABASE_SETUP_MESSAGE)
+      return
+    }
+
+    setBulkDeleting(true)
+    setBulkDeleteError(null)
+
+    try {
+      const supabase = createClient()
+      const { error } = await supabase.from('article_requests').delete().in('id', ids)
+
+      if (error) {
+        throw error
+      }
+
+      setNotice({
+        tone: 'success',
+        message: `${ids.length} article request${ids.length === 1 ? '' : 's'} deleted.`,
+      })
+      setSelectedIds(new Set())
+      setBulkDeleteOpen(false)
+      await loadData({ silent: true })
+    } catch (error) {
+      setBulkDeleteError(
+        getErrorMessage(error, 'Unable to delete the selected article requests.')
+      )
+    } finally {
+      setBulkDeleting(false)
     }
   }
 
@@ -1293,6 +1381,17 @@ export function ArticleRequestManager() {
               </button>
               <button
                 type="button"
+                onClick={() => {
+                  setBulkDeleteError(null)
+                  setBulkDeleteOpen(true)
+                }}
+                className="inline-flex items-center gap-1.5 rounded-xl border border-rose-200 bg-rose-50 px-3 py-1.5 text-sm font-medium text-rose-700 transition-colors hover:bg-rose-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-500"
+              >
+                <Trash2 className="h-4 w-4" />
+                Delete selected
+              </button>
+              <button
+                type="button"
                 onClick={() => setAssignOpen(true)}
                 disabled={selectedClientIds.size !== 1}
                 className={`${primaryButtonClass} px-3 py-1.5`}
@@ -1472,7 +1571,7 @@ export function ArticleRequestManager() {
               <select
                 id="article-department"
                 value={form.department_id}
-                onChange={(event) => updateForm('department_id', event.target.value)}
+                onChange={(event) => handleDepartmentChange(event.target.value)}
                 disabled={!form.client_id || formDepartments.length === 0}
                 className={inputClass}
               >
@@ -1506,7 +1605,7 @@ export function ArticleRequestManager() {
                   {!form.client_id
                     ? 'Select a client first'
                     : formContacts.length === 0
-                      ? 'No contacts for this client'
+                      ? 'No contacts for this department'
                       : 'No contact'}
                 </option>
                 {formContacts.map((contact) => (
@@ -1700,6 +1799,23 @@ export function ArticleRequestManager() {
           setNotice({ tone: 'success', message })
           await loadData({ silent: true })
         }}
+      />
+
+      <ConfirmDialog
+        open={bulkDeleteOpen}
+        title={`Delete ${selectedArticles.length} selected article request${
+          selectedArticles.length === 1 ? '' : 's'
+        }?`}
+        message="This permanently removes every selected article request. Rows linked to an invoice are not selectable."
+        busy={bulkDeleting}
+        error={bulkDeleteError}
+        onCancel={() => {
+          if (!bulkDeleting) {
+            setBulkDeleteOpen(false)
+            setBulkDeleteError(null)
+          }
+        }}
+        onConfirm={() => void handleBulkDelete()}
       />
 
       <ConfirmDialog

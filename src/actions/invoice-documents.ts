@@ -9,6 +9,7 @@
 import type { ArticleRequestRow } from '@/lib/article-request-meta'
 import { buildInvoiceDocumentData } from '@/lib/invoice-documents'
 import { renderInvoiceDocx } from '@/lib/invoice-docx'
+import { isMissingColumnError } from '@/lib/supabase-errors'
 import { createClient } from '@/utils/supabase/server'
 
 const DOCX_MIME_TYPE =
@@ -48,6 +49,7 @@ type TaxInvoiceRow = {
   grand_total: number | null
   po_number: string | null
   po_date: string | null
+  notes: string | null
   document_content: string | null
   created_at: string | null
 }
@@ -69,6 +71,9 @@ type ProformaLinkRow = {
 type ClientRow = {
   company_name: string | null
   location: string | null
+  address: string | null
+  city: string | null
+  state: string | null
   gstin: string | null
   email: string | null
   phone: string | null
@@ -106,17 +111,33 @@ async function fetchClient(
   }
 
   const supabase = await createClient()
-  const { data, error } = await supabase
+  const primary = await supabase
     .from('clients')
-    .select('company_name, location, gstin, email, phone')
+    .select('company_name, location, address, city, state, gstin, email, phone')
     .eq('id', clientId)
     .maybeSingle()
+
+  let data = primary.data as ClientRow | null
+  let error = primary.error
+
+  // Older deployments may not have the structured address migration yet; fall
+  // back to the legacy columns so downloads keep working.
+  if (error && isMissingColumnError(error)) {
+    const fallback = await supabase
+      .from('clients')
+      .select('company_name, location, gstin, email, phone')
+      .eq('id', clientId)
+      .maybeSingle()
+
+    data = fallback.data as ClientRow | null
+    error = fallback.error
+  }
 
   if (error) {
     throw error
   }
 
-  return (data as ClientRow | null) ?? null
+  return data
 }
 
 async function fetchDepartmentName(
@@ -367,6 +388,7 @@ export async function downloadTaxInvoiceDocument(
       linkedProformaNumbers: proformas.map((proforma) => proforma.pi_number),
       buyerOrderNo: invoice.po_number,
       buyerOrderDate: invoice.po_date,
+      notes: invoice.notes,
     })
 
     const buffer = await renderInvoiceDocx(data)

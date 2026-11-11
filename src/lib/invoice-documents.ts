@@ -38,7 +38,12 @@ export type BuyerProfile = {
 
 export type InvoiceClientInfo = {
   company_name: string | null
+  /** Free-form legacy address; used when the structured fields are empty. */
   location: string | null
+  /** Structured address lines added by the client master. */
+  address: string | null
+  city: string | null
+  state: string | null
   gstin: string | null
   email: string | null
   phone: string | null
@@ -67,6 +72,8 @@ export type InvoiceDocumentData = {
   purchaseOf: string
   purchaseArticlesOf: string
   purchaseArticlesLine: string
+  /** Notes / remark captured on the invoice; printed on the tax invoice. */
+  notes: string
   deliveryDateLabel: string
   serviceCode: string
   serviceDescription: string
@@ -105,6 +112,58 @@ export type InvoiceDocumentInput = {
   /** Purchase order captured on the tax invoice; overrides template defaults. */
   buyerOrderNo?: string | null
   buyerOrderDate?: string | null
+  /** Notes / remark captured on the tax invoice. */
+  notes?: string | null
+}
+
+/** GST state codes, used when the client master names a state. */
+const STATE_CODES: Record<string, string> = {
+  'jammu and kashmir': '01',
+  'himachal pradesh': '02',
+  punjab: '03',
+  chandigarh: '04',
+  uttarakhand: '05',
+  haryana: '06',
+  delhi: '07',
+  rajasthan: '08',
+  'uttar pradesh': '09',
+  bihar: '10',
+  sikkim: '11',
+  'arunachal pradesh': '12',
+  nagaland: '13',
+  manipur: '14',
+  mizoram: '15',
+  tripura: '16',
+  meghalaya: '17',
+  assam: '18',
+  'west bengal': '19',
+  jharkhand: '20',
+  odisha: '21',
+  orissa: '21',
+  chhattisgarh: '22',
+  'madhya pradesh': '23',
+  gujarat: '24',
+  'dadra and nagar haveli and daman and diu': '26',
+  maharashtra: '27',
+  karnataka: '29',
+  goa: '30',
+  lakshadweep: '31',
+  kerala: '32',
+  'tamil nadu': '33',
+  puducherry: '34',
+  pondicherry: '34',
+  'andaman and nicobar islands': '35',
+  telangana: '36',
+  'andhra pradesh': '37',
+  ladakh: '38',
+}
+
+function resolveStateCode(stateName: string | null | undefined): string {
+  if (!stateName) {
+    return ''
+  }
+
+  return STATE_CODES[stateName.trim().toLowerCase()] ?? ''
 }
 
 /** Seller details fixed in the supplied templates. */
@@ -386,6 +445,41 @@ function splitAddress(location: string): string[] {
   return merged
 }
 
+/**
+ * Build the "Billed To" address lines from the structured client fields.
+ * Returns null when the client master has no address data at all, so the
+ * caller can fall back to `location` / the template default.
+ */
+function composeAddressLines(
+  client: InvoiceClientInfo | null | undefined
+): string[] | null {
+  if (!client) {
+    return null
+  }
+
+  const address = client.address?.trim()
+  const city = client.city?.trim()
+  const state = client.state?.trim()
+
+  if (!address && !city && !state) {
+    return null
+  }
+
+  const lines: string[] = []
+
+  if (address) {
+    lines.push(...splitAddress(address))
+  }
+
+  const cityState = [city, state].filter(Boolean).join(', ')
+
+  if (cityState) {
+    lines.push(cityState)
+  }
+
+  return lines.length > 0 ? lines : null
+}
+
 function parseOverrides(documentContent: string | null | undefined): DocumentOverrides {
   if (!documentContent || !documentContent.trim().startsWith('{')) {
     return {}
@@ -437,12 +531,15 @@ export function buildInvoiceDocumentData(
 
   const buyer: BuyerProfile = {
     name: input.client?.company_name?.trim() || BUYER_PROFILE.name,
-    addressLines: input.client?.location?.trim()
-      ? splitAddress(input.client.location)
-      : BUYER_PROFILE.addressLines,
+    addressLines:
+      composeAddressLines(input.client) ??
+      (input.client?.location?.trim()
+        ? splitAddress(input.client.location)
+        : BUYER_PROFILE.addressLines),
     gstin: input.client?.gstin?.trim() || BUYER_PROFILE.gstin,
-    stateName: BUYER_PROFILE.stateName,
-    stateCode: BUYER_PROFILE.stateCode,
+    stateName: input.client?.state?.trim() || BUYER_PROFILE.stateName,
+    stateCode:
+      resolveStateCode(input.client?.state?.trim()) || BUYER_PROFILE.stateCode,
   }
 
   const computedSubtotal = roundMoney(
@@ -524,6 +621,8 @@ export function buildInvoiceDocumentData(
     overrides.purchase_articles_of ??
     formatMonthYear(requestDates[0] ?? invoiceDate)
 
+  const notes = input.notes?.trim() ?? ''
+
   const estimateNumbers = (input.linkedProformaNumbers ?? [])
     .map((value) => value?.trim() ?? '')
     .filter(Boolean)
@@ -532,17 +631,21 @@ export function buildInvoiceDocumentData(
     ? purchaseArticlesOf
     : `Purchase Articles Of ${purchaseArticlesOf}`
 
-  const purchaseArticlesLine = `${purchaseArticlesLabel}${
-    kind === 'TAX' && estimateNumbers.length > 0
-      ? ` (As Per Estimate : ${estimateNumbers.join(', ')})`
-      : ''
-  }`
+  // The tax invoice template prints its own Notes / Remark text in this block
+  // when one was captured; otherwise keep the generated "Purchase Articles Of".
+  const purchaseArticlesLine =
+    kind === 'TAX' && notes
+      ? notes
+      : `${purchaseArticlesLabel}${
+          kind === 'TAX' && estimateNumbers.length > 0
+            ? ` (As Per Estimate : ${estimateNumbers.join(', ')})`
+            : ''
+        }`
 
+  // "Kind Attn" is the contact person named on the request / invoice.
   const kindAttention =
     overrides.kind_attention ??
-    [input.departmentName, input.contactName]
-      .map((value) => value?.trim() ?? '')
-      .filter(Boolean)
+    (input.contactName?.trim() ? [input.contactName.trim()] : [])
 
   const cgstAmount = roundMoney(taxTotal / 2)
   const sgstAmount = roundMoney(taxTotal - cgstAmount)
@@ -570,6 +673,7 @@ export function buildInvoiceDocumentData(
     purchaseOf: overrides.purchase_of ?? PURCHASE_OF_ARTICLES,
     purchaseArticlesOf,
     purchaseArticlesLine,
+    notes,
     deliveryDateLabel: overrides.delivery_date
       ? formatDocumentDate(overrides.delivery_date)
       : formatDeliveryDate(invoiceDate),
