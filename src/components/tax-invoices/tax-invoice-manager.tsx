@@ -1,9 +1,14 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
 import {
+  ChevronDown,
+  ChevronRight,
+  ChevronsDownUp,
+  ChevronsUpDown,
   Download,
   Eye,
+  Layers,
   ListChecks,
   Pencil,
   Plus,
@@ -33,12 +38,20 @@ import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { IconButton } from '@/components/ui/icon-button'
 import { InboxIcon, PlusIcon, SpinnerIcon } from '@/components/ui/icons'
 import { Modal } from '@/components/ui/modal'
-import { isMissingColumnError, isMissingTableError } from '@/lib/supabase-errors'
+import {
+  groupInvoicesByClientAndDepartment,
+  invoiceDepartmentRef,
+  resolveTaxInvoiceDepartments,
+  type DepartmentOption,
+  type InvoiceDepartmentRef,
+  type ProformaDepartmentLink,
+} from '@/lib/invoice-grouping'
 import {
   PI_GENERATED_STATUS,
   recalculateTaxInvoicePayment,
   recalculateTaxInvoiceTotals,
 } from '@/lib/invoice-links'
+import { isMissingColumnError, isMissingTableError } from '@/lib/supabase-errors'
 import {
   effectiveTaxStatus,
   parseLinkedProformaIds,
@@ -65,6 +78,10 @@ const STATUS_TONES: Record<string, string> = {
 export function TaxInvoiceManager() {
   const [clients, setClients] = useState<TaxClientOption[]>([])
   const [statuses, setStatuses] = useState<TaxStatusOption[]>([])
+  const [departments, setDepartments] = useState<DepartmentOption[]>([])
+  const [proformaDepartmentLinks, setProformaDepartmentLinks] = useState<ProformaDepartmentLink[]>(
+    []
+  )
   const [invoices, setInvoices] = useState<InvoiceWithLinks[]>([])
 
   const [loading, setLoading] = useState(true)
@@ -73,14 +90,20 @@ export function TaxInvoiceManager() {
 
   const [query, setQuery] = useState('')
   const [clientFilter, setClientFilter] = useState('')
+  const [departmentFilter, setDepartmentFilter] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
+  const [grouped, setGrouped] = useState(true)
+  const [collapsedClients, setCollapsedClients] = useState<Set<string>>(() => new Set())
+  const [collapsedDepartments, setCollapsedDepartments] = useState<Set<string>>(() => new Set())
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
     const status = params.get('status')
     const client = params.get('client')
+    const department = params.get('department')
     if (status) setStatusFilter(status)
     if (client) setClientFilter(client)
+    if (department) setDepartmentFilter(department)
   }, [])
 
   const [dialogOpen, setDialogOpen] = useState(false)
@@ -118,6 +141,14 @@ export function TaxInvoiceManager() {
     return map
   }, [statuses])
 
+  const departmentNames = useMemo(() => {
+    const map = new Map<string, string>()
+    for (const department of departments) {
+      map.set(department.id, department.department_name)
+    }
+    return map
+  }, [departments])
+
   const loadData = useCallback(async (options?: { silent?: boolean }) => {
     if (!options?.silent) {
       setLoading(true)
@@ -132,7 +163,13 @@ export function TaxInvoiceManager() {
 
     try {
       const supabase = createClient()
-      const [clientsResult, invoicesResult, statusesResult] = await Promise.all([
+      const [
+        clientsResult,
+        invoicesResult,
+        statusesResult,
+        departmentsResult,
+        proformaResult,
+      ] = await Promise.all([
         supabase.from('clients').select('id, company_name').order('company_name'),
         supabase
           .from('tax_invoices')
@@ -144,6 +181,13 @@ export function TaxInvoiceManager() {
           .select('status_code, status_label, display_order')
           .order('display_order', { ascending: true })
           .order('status_code', { ascending: true }),
+        supabase
+          .from('departments')
+          .select('id, department_name, client_id')
+          .order('department_name', { ascending: true }),
+        // Tax invoices have no department column; resolve it from the
+        // proforma invoices linked to them.
+        supabase.from('proforma_invoices').select('id, tax_invoice_id, department_id'),
       ])
 
       if (clientsResult.error) {
@@ -154,6 +198,24 @@ export function TaxInvoiceManager() {
         throw invoicesResult.error
       }
 
+      // Departments are optional: the page still loads before the migration
+      // that adds them has run.
+      if (
+        departmentsResult.error &&
+        !isMissingTableError(departmentsResult.error) &&
+        !isMissingColumnError(departmentsResult.error)
+      ) {
+        throw departmentsResult.error
+      }
+
+      if (
+        proformaResult.error &&
+        !isMissingTableError(proformaResult.error) &&
+        !isMissingColumnError(proformaResult.error)
+      ) {
+        throw proformaResult.error
+      }
+
       // The status master is optional: statuses are stored as plain codes.
       const loadedStatuses = statusesResult.error
         ? []
@@ -161,6 +223,8 @@ export function TaxInvoiceManager() {
 
       setClients((clientsResult.data ?? []) as TaxClientOption[])
       setInvoices((invoicesResult.data ?? []) as InvoiceWithLinks[])
+      setDepartments((departmentsResult.data ?? []) as DepartmentOption[])
+      setProformaDepartmentLinks((proformaResult.data ?? []) as ProformaDepartmentLink[])
       setStatuses(
         loadedStatuses.length > 0
           ? loadedStatuses
@@ -187,11 +251,49 @@ export function TaxInvoiceManager() {
     void loadData()
   }, [loadData])
 
+  // Keep dependent filters coherent when the client filter changes.
+  useEffect(() => {
+    if (!departmentFilter || departments.length === 0) {
+      return
+    }
+
+    const department = departments.find((item) => item.id === departmentFilter)
+
+    if (!department || (clientFilter && department.client_id !== clientFilter)) {
+      setDepartmentFilter('')
+    }
+  }, [clientFilter, departmentFilter, departments])
+
+  const filterDepartments = useMemo(() => {
+    if (!clientFilter) {
+      return departments
+    }
+
+    return departments.filter((department) => department.client_id === clientFilter)
+  }, [clientFilter, departments])
+
+  const taxDepartmentRefs = useMemo<Map<string, InvoiceDepartmentRef>>(
+    () => resolveTaxInvoiceDepartments(invoices, proformaDepartmentLinks, departmentNames),
+    [departmentNames, invoices, proformaDepartmentLinks]
+  )
+
+  const departmentForInvoice = useCallback(
+    (invoice: InvoiceWithLinks) =>
+      taxDepartmentRefs.get(invoice.id) ?? invoiceDepartmentRef(null, departmentNames),
+    [departmentNames, taxDepartmentRefs]
+  )
+
   const filteredInvoices = useMemo(() => {
     const term = query.trim().toLowerCase()
 
     return invoices.filter((invoice) => {
       if (clientFilter && invoice.client_id !== clientFilter) {
+        return false
+      }
+
+      const department = departmentForInvoice(invoice)
+
+      if (departmentFilter && !department.ids.includes(departmentFilter)) {
         return false
       }
 
@@ -209,6 +311,7 @@ export function TaxInvoiceManager() {
         invoice.tax_invoice_number ?? '',
         invoice.po_number ?? '',
         invoice.client_id ? clientNames.get(invoice.client_id) ?? '' : '',
+        department.label,
         status,
         statusLabels.get(status) ?? '',
       ]
@@ -216,7 +319,26 @@ export function TaxInvoiceManager() {
         .toLowerCase()
         .includes(term)
     })
-  }, [clientFilter, clientNames, invoices, query, statusFilter, statusLabels])
+  }, [
+    clientFilter,
+    clientNames,
+    departmentFilter,
+    departmentForInvoice,
+    invoices,
+    query,
+    statusFilter,
+    statusLabels,
+  ])
+
+  const invoiceGroups = useMemo(
+    () =>
+      groupInvoicesByClientAndDepartment(filteredInvoices, {
+        getClientId: (invoice) => invoice.client_id,
+        getDepartment: (invoice) => departmentForInvoice(invoice),
+        clientNames,
+      }),
+    [clientNames, departmentForInvoice, filteredInvoices]
+  )
 
   const summary = useMemo(() => {
     let invoiced = 0
@@ -715,6 +837,141 @@ export function TaxInvoiceManager() {
     (invoice) => effectiveTaxStatus(invoice) !== 'PAID'
   ).length
 
+  function toggleClientGroup(key: string) {
+    setCollapsedClients((current) => toggleKey(current, key))
+  }
+
+  function toggleDepartmentGroup(key: string) {
+    setCollapsedDepartments((current) => toggleKey(current, key))
+  }
+
+  const allClientsCollapsed =
+    invoiceGroups.length > 0 && invoiceGroups.every((group) => collapsedClients.has(group.key))
+
+  function toggleAllGroups() {
+    if (allClientsCollapsed) {
+      setCollapsedClients(new Set())
+      setCollapsedDepartments(new Set())
+      return
+    }
+
+    setCollapsedClients(new Set(invoiceGroups.map((group) => group.key)))
+    setCollapsedDepartments(new Set())
+  }
+
+  function renderInvoiceRow(invoice: InvoiceWithLinks) {
+    const status = effectiveTaxStatus(invoice)
+
+    return (
+      <tr key={invoice.id} className="transition-colors hover:bg-slate-50/70">
+        <td className="whitespace-nowrap px-4 py-3">
+          <span className="font-mono text-xs font-medium text-slate-700">
+            {invoice.tax_invoice_number?.trim() || invoice.id.slice(0, 8).toUpperCase()}
+          </span>
+        </td>
+        <td className="whitespace-nowrap px-4 py-3 text-slate-600">
+          {formatDate(invoice.invoice_date ?? invoice.created_at)}
+        </td>
+        <td className="whitespace-nowrap px-4 py-3 font-mono text-xs text-slate-600">
+          {invoice.po_number?.trim() || '—'}
+        </td>
+        <td className="whitespace-nowrap px-4 py-3 text-slate-600">
+          {formatDate(invoice.po_date)}
+        </td>
+        <td className="px-4 py-3 font-medium text-slate-900">
+          {invoice.client_id ? clientNames.get(invoice.client_id) ?? 'Unknown client' : '—'}
+        </td>
+        <td className="whitespace-nowrap px-4 py-3 text-right tabular-nums text-slate-600">
+          {formatCurrency(invoice.subtotal)}
+        </td>
+        <td className="whitespace-nowrap px-4 py-3 text-right tabular-nums text-slate-600">
+          {formatCurrency(invoice.tax_total)}
+        </td>
+        <td className="whitespace-nowrap px-4 py-3 text-right font-semibold tabular-nums text-slate-900">
+          {formatCurrency(invoice.grand_total)}
+        </td>
+        <td className="px-4 py-3">
+          <span
+            className={`${badgeClass} ${
+              STATUS_TONES[status] ?? 'bg-slate-100 text-slate-600 ring-slate-500/20'
+            }`}
+            title={statusLabels.get(status) ?? status}
+          >
+            {status.replace(/_/g, ' ')}
+          </span>
+        </td>
+        <td className="whitespace-nowrap px-4 py-3 text-right tabular-nums text-slate-600">
+          {formatCurrency(toNumber(invoice.amount_paid))}
+        </td>
+        <td className="px-4 py-3">
+          <div className="flex items-center justify-end gap-1">
+            <IconButton
+              label={`Manage proforma invoices on ${
+                invoice.tax_invoice_number ?? 'tax invoice'
+              }`}
+              tooltipText="Proformas: add or remove linked proforma invoices"
+              tooltip="native"
+              variant="ghost"
+              size="sm"
+              icon={<ListChecks />}
+              onClick={() => setViewTarget(invoice)}
+            />
+            <IconButton
+              label={`View ${invoice.tax_invoice_number ?? 'tax invoice'}`}
+              tooltipText="View invoice"
+              tooltip="native"
+              variant="ghost"
+              size="sm"
+              icon={<Eye />}
+              onClick={() => setViewTarget(invoice)}
+            />
+            <IconButton
+              label={`Download ${invoice.tax_invoice_number ?? 'tax invoice'} as Word`}
+              tooltipText={
+                downloadingId === invoice.id
+                  ? 'Generating Word document…'
+                  : 'Download Word (.docx)'
+              }
+              tooltip="native"
+              variant="ghost"
+              size="sm"
+              icon={
+                downloadingId === invoice.id ? (
+                  <SpinnerIcon className="h-4 w-4" />
+                ) : (
+                  <Download />
+                )
+              }
+              disabled={downloadingId !== null}
+              onClick={() => void handleDownloadWord(invoice)}
+            />
+            <IconButton
+              label={`Edit ${invoice.tax_invoice_number ?? 'tax invoice'}`}
+              tooltipText="Edit invoice details"
+              tooltip="native"
+              variant="ghost"
+              size="sm"
+              icon={<Pencil />}
+              onClick={() => openEditDialog(invoice)}
+            />
+            <IconButton
+              label={`Delete ${invoice.tax_invoice_number ?? 'tax invoice'}`}
+              tooltipText="Delete invoice"
+              tooltip="native"
+              variant="danger"
+              size="sm"
+              icon={<Trash2 />}
+              onClick={() => {
+                setDeleteError(null)
+                setDeleteTarget(invoice)
+              }}
+            />
+          </div>
+        </td>
+      </tr>
+    )
+  }
+
   return (
     <div className="space-y-5">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
@@ -774,13 +1031,13 @@ export function TaxInvoiceManager() {
               type="search"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="Search invoice number, PO number or client"
+              placeholder="Search invoice number, PO number, client or department"
               aria-label="Search tax invoices"
               className={`${inputClass} pl-9`}
             />
           </div>
 
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+          <div className="flex flex-wrap items-center gap-2">
             <label className="sr-only" htmlFor="ti-client-filter">
               Filter by client
             </label>
@@ -788,12 +1045,29 @@ export function TaxInvoiceManager() {
               id="ti-client-filter"
               value={clientFilter}
               onChange={(event) => setClientFilter(event.target.value)}
-              className={`${inputClass} sm:w-48`}
+              className={`${inputClass} w-full sm:w-44`}
             >
               <option value="">All clients</option>
               {clients.map((client) => (
                 <option key={client.id} value={client.id}>
                   {client.company_name}
+                </option>
+              ))}
+            </select>
+
+            <label className="sr-only" htmlFor="ti-department-filter">
+              Filter by department
+            </label>
+            <select
+              id="ti-department-filter"
+              value={departmentFilter}
+              onChange={(event) => setDepartmentFilter(event.target.value)}
+              className={`${inputClass} w-full sm:w-44`}
+            >
+              <option value="">All departments</option>
+              {filterDepartments.map((department) => (
+                <option key={department.id} value={department.id}>
+                  {department.department_name}
                 </option>
               ))}
             </select>
@@ -805,7 +1079,7 @@ export function TaxInvoiceManager() {
               id="ti-status-filter"
               value={statusFilter}
               onChange={(event) => setStatusFilter(event.target.value)}
-              className={`${inputClass} sm:w-44`}
+              className={`${inputClass} w-full sm:w-40`}
             >
               <option value="">All statuses</option>
               {statuses.map((status) => (
@@ -815,6 +1089,37 @@ export function TaxInvoiceManager() {
               ))}
               <option value="OVERDUE">Overdue</option>
             </select>
+
+            <button
+              type="button"
+              onClick={() => setGrouped((value) => !value)}
+              aria-pressed={grouped}
+              aria-label={grouped ? 'Show a flat list' : 'Group by client and department'}
+              title={grouped ? 'Show a flat list' : 'Group by client and department'}
+              className={`${secondaryButtonClass} px-2.5 py-2`}
+            >
+              <Layers className="h-4 w-4" />
+              <span className="hidden xl:inline">{grouped ? 'Grouped' : 'Flat'}</span>
+            </button>
+
+            {grouped && (
+              <button
+                type="button"
+                onClick={toggleAllGroups}
+                aria-label={allClientsCollapsed ? 'Expand all groups' : 'Collapse all groups'}
+                title={allClientsCollapsed ? 'Expand all groups' : 'Collapse all groups'}
+                className={`${secondaryButtonClass} px-2.5 py-2`}
+              >
+                {allClientsCollapsed ? (
+                  <ChevronsUpDown className="h-4 w-4" />
+                ) : (
+                  <ChevronsDownUp className="h-4 w-4" />
+                )}
+                <span className="hidden xl:inline">
+                  {allClientsCollapsed ? 'Expand all' : 'Collapse all'}
+                </span>
+              </button>
+            )}
 
             <button
               type="button"
@@ -915,123 +1220,81 @@ export function TaxInvoiceManager() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {filteredInvoices.map((invoice) => {
-                  const status = effectiveTaxStatus(invoice)
+                {grouped
+                  ? invoiceGroups.map((client) => {
+                      const clientCollapsed = collapsedClients.has(client.key)
 
-                  return (
-                    <tr key={invoice.id} className="transition-colors hover:bg-slate-50/70">
-                      <td className="whitespace-nowrap px-4 py-3">
-                        <span className="font-mono text-xs font-medium text-slate-700">
-                          {invoice.tax_invoice_number?.trim() ||
-                            invoice.id.slice(0, 8).toUpperCase()}
-                        </span>
-                      </td>
-                      <td className="whitespace-nowrap px-4 py-3 text-slate-600">
-                        {formatDate(invoice.invoice_date ?? invoice.created_at)}
-                      </td>
-                      <td className="whitespace-nowrap px-4 py-3 font-mono text-xs text-slate-600">
-                        {invoice.po_number?.trim() || '—'}
-                      </td>
-                      <td className="whitespace-nowrap px-4 py-3 text-slate-600">
-                        {formatDate(invoice.po_date)}
-                      </td>
-                      <td className="px-4 py-3 font-medium text-slate-900">
-                        {invoice.client_id
-                          ? clientNames.get(invoice.client_id) ?? 'Unknown client'
-                          : '—'}
-                      </td>
-                      <td className="whitespace-nowrap px-4 py-3 text-right tabular-nums text-slate-600">
-                        {formatCurrency(invoice.subtotal)}
-                      </td>
-                      <td className="whitespace-nowrap px-4 py-3 text-right tabular-nums text-slate-600">
-                        {formatCurrency(invoice.tax_total)}
-                      </td>
-                      <td className="whitespace-nowrap px-4 py-3 text-right font-semibold tabular-nums text-slate-900">
-                        {formatCurrency(invoice.grand_total)}
-                      </td>
-                      <td className="px-4 py-3">
-                        <span
-                          className={`${badgeClass} ${
-                            STATUS_TONES[status] ?? 'bg-slate-100 text-slate-600 ring-slate-500/20'
-                          }`}
-                          title={statusLabels.get(status) ?? status}
-                        >
-                          {status.replace(/_/g, ' ')}
-                        </span>
-                      </td>
-                      <td className="whitespace-nowrap px-4 py-3 text-right tabular-nums text-slate-600">
-                        {formatCurrency(toNumber(invoice.amount_paid))}
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center justify-end gap-1">
-                          <IconButton
-                            label={`Manage proforma invoices on ${
-                              invoice.tax_invoice_number ?? 'tax invoice'
-                            }`}
-                            tooltipText="Proformas: add or remove linked proforma invoices"
-                            tooltip="native"
-                            variant="ghost"
-                            size="sm"
-                            icon={<ListChecks />}
-                            onClick={() => setViewTarget(invoice)}
-                          />
-                          <IconButton
-                            label={`View ${invoice.tax_invoice_number ?? 'tax invoice'}`}
-                            tooltipText="View invoice"
-                            tooltip="native"
-                            variant="ghost"
-                            size="sm"
-                            icon={<Eye />}
-                            onClick={() => setViewTarget(invoice)}
-                          />
-                          <IconButton
-                            label={`Download ${
-                              invoice.tax_invoice_number ?? 'tax invoice'
-                            } as Word`}
-                            tooltipText={
-                              downloadingId === invoice.id
-                                ? 'Generating Word document…'
-                                : 'Download Word (.docx)'
-                            }
-                            tooltip="native"
-                            variant="ghost"
-                            size="sm"
-                            icon={
-                              downloadingId === invoice.id ? (
-                                <SpinnerIcon className="h-4 w-4" />
-                              ) : (
-                                <Download />
+                      return (
+                        <Fragment key={client.key}>
+                          <tr className="bg-slate-100/80">
+                            <td colSpan={11} className="p-0">
+                              <button
+                                type="button"
+                                onClick={() => toggleClientGroup(client.key)}
+                                aria-expanded={!clientCollapsed}
+                                className="flex w-full flex-wrap items-center gap-2 px-4 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-700 transition-colors hover:bg-slate-200/70"
+                              >
+                                {clientCollapsed ? (
+                                  <ChevronRight className="h-4 w-4 shrink-0 text-slate-500" />
+                                ) : (
+                                  <ChevronDown className="h-4 w-4 shrink-0 text-slate-500" />
+                                )}
+                                <span>{client.clientLabel}</span>
+                                <span className="rounded-full bg-white px-2 py-0.5 text-[11px] font-medium normal-case tracking-normal text-slate-500 ring-1 ring-inset ring-slate-200">
+                                  {client.invoiceCount} invoice
+                                  {client.invoiceCount === 1 ? '' : 's'}
+                                </span>
+                                <span className="ml-auto text-[11px] font-semibold normal-case tracking-normal tabular-nums text-slate-600">
+                                  {formatCurrency(
+                                    sumGrandTotals(
+                                      client.departments.flatMap(
+                                        (department) => department.invoices
+                                      )
+                                    )
+                                  )}
+                                </span>
+                              </button>
+                            </td>
+                          </tr>
+                          {!clientCollapsed &&
+                            client.departments.map((department) => {
+                              const departmentCollapsed = collapsedDepartments.has(department.key)
+
+                              return (
+                                <Fragment key={department.key}>
+                                  <tr className="bg-slate-50">
+                                    <td colSpan={11} className="p-0">
+                                      <button
+                                        type="button"
+                                        onClick={() => toggleDepartmentGroup(department.key)}
+                                        aria-expanded={!departmentCollapsed}
+                                        className="flex w-full flex-wrap items-center gap-2 py-1.5 pl-9 pr-4 text-left text-xs font-medium text-slate-600 transition-colors hover:bg-slate-100"
+                                      >
+                                        {departmentCollapsed ? (
+                                          <ChevronRight className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+                                        ) : (
+                                          <ChevronDown className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+                                        )}
+                                        <span>{department.department.label}</span>
+                                        <span className="rounded-full bg-white px-2 py-0.5 text-[11px] font-normal text-slate-500 ring-1 ring-inset ring-slate-200">
+                                          {department.invoiceCount} invoice
+                                          {department.invoiceCount === 1 ? '' : 's'}
+                                        </span>
+                                        <span className="ml-auto text-[11px] font-semibold tabular-nums text-slate-600">
+                                          {formatCurrency(sumGrandTotals(department.invoices))}
+                                        </span>
+                                      </button>
+                                    </td>
+                                  </tr>
+                                  {!departmentCollapsed &&
+                                    department.invoices.map(renderInvoiceRow)}
+                                </Fragment>
                               )
-                            }
-                            disabled={downloadingId !== null}
-                            onClick={() => void handleDownloadWord(invoice)}
-                          />
-                          <IconButton
-                            label={`Edit ${invoice.tax_invoice_number ?? 'tax invoice'}`}
-                            tooltipText="Edit invoice details"
-                            tooltip="native"
-                            variant="ghost"
-                            size="sm"
-                            icon={<Pencil />}
-                            onClick={() => openEditDialog(invoice)}
-                          />
-                          <IconButton
-                            label={`Delete ${invoice.tax_invoice_number ?? 'tax invoice'}`}
-                            tooltipText="Delete invoice"
-                            tooltip="native"
-                            variant="danger"
-                            size="sm"
-                            icon={<Trash2 />}
-                            onClick={() => {
-                              setDeleteError(null)
-                              setDeleteTarget(invoice)
-                            }}
-                          />
-                        </div>
-                      </td>
-                    </tr>
-                  )
-                })}
+                            })}
+                        </Fragment>
+                      )
+                    })
+                  : filteredInvoices.map(renderInvoiceRow)}
               </tbody>
             </table>
           </div>
@@ -1389,4 +1652,20 @@ function TableSkeleton() {
       ))}
     </div>
   )
+}
+
+function sumGrandTotals(invoices: InvoiceWithLinks[]): number {
+  return invoices.reduce((sum, invoice) => sum + toNumber(invoice.grand_total), 0)
+}
+
+function toggleKey(current: Set<string>, key: string): Set<string> {
+  const next = new Set(current)
+
+  if (next.has(key)) {
+    next.delete(key)
+  } else {
+    next.add(key)
+  }
+
+  return next
 }

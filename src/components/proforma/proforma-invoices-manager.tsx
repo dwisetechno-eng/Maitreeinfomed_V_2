@@ -1,10 +1,15 @@
 'use client'
 
 import type { FormEvent } from 'react'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
 import {
+  ChevronDown,
+  ChevronRight,
+  ChevronsDownUp,
+  ChevronsUpDown,
   Download,
   Eye,
+  Layers,
   ListChecks,
   Pencil,
   Plus,
@@ -41,6 +46,11 @@ import {
   type ArticleRequestRow,
 } from '@/lib/article-request-meta'
 import {
+  groupInvoicesByClientAndDepartment,
+  invoiceDepartmentRef,
+  type DepartmentOption,
+} from '@/lib/invoice-grouping'
+import {
   articleLinkAmount,
   fetchPendingArticleStatus,
   PI_GENERATED_STATUS,
@@ -58,6 +68,7 @@ type ProformaInvoiceRow = {
   pi_number: string | null
   pi_date: string | null
   client_id: string | null
+  department_id?: string | null
   status_code: string | null
   subtotal: number | null
   tax_rate?: number | null
@@ -97,6 +108,7 @@ const EMPTY_EDIT_FORM: EditForm = {
 export function ProformaInvoicesManager() {
   const [clients, setClients] = useState<ClientOption[]>([])
   const [statuses, setStatuses] = useState<StatusOption[]>([])
+  const [departments, setDepartments] = useState<DepartmentOption[]>([])
   const [invoices, setInvoices] = useState<ProformaInvoiceRow[]>([])
 
   const [loading, setLoading] = useState(true)
@@ -105,14 +117,20 @@ export function ProformaInvoicesManager() {
 
   const [query, setQuery] = useState('')
   const [clientFilter, setClientFilter] = useState('')
+  const [departmentFilter, setDepartmentFilter] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
+  const [grouped, setGrouped] = useState(true)
+  const [collapsedClients, setCollapsedClients] = useState<Set<string>>(() => new Set())
+  const [collapsedDepartments, setCollapsedDepartments] = useState<Set<string>>(() => new Set())
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
     const status = params.get('status')
     const client = params.get('client')
+    const department = params.get('department')
     if (status) setStatusFilter(status)
     if (client) setClientFilter(client)
+    if (department) setDepartmentFilter(department)
   }, [])
 
   const [createOpen, setCreateOpen] = useState(false)
@@ -154,6 +172,14 @@ export function ProformaInvoicesManager() {
     return map
   }, [statuses])
 
+  const departmentNames = useMemo(() => {
+    const map = new Map<string, string>()
+    for (const department of departments) {
+      map.set(department.id, department.department_name)
+    }
+    return map
+  }, [departments])
+
   const loadData = useCallback(async (options?: { silent?: boolean }) => {
     if (!options?.silent) {
       setLoading(true)
@@ -168,7 +194,7 @@ export function ProformaInvoicesManager() {
 
     try {
       const supabase = createClient()
-      const [clientsResult, invoicesResult, statusesResult] = await Promise.all([
+      const [clientsResult, invoicesResult, statusesResult, departmentsResult] = await Promise.all([
         supabase.from('clients').select('id, company_name').order('company_name'),
         supabase
           .from('proforma_invoices')
@@ -180,6 +206,10 @@ export function ProformaInvoicesManager() {
           .select('status_code, status_label, display_order')
           .order('display_order', { ascending: true })
           .order('status_code', { ascending: true }),
+        supabase
+          .from('departments')
+          .select('id, department_name, client_id')
+          .order('department_name', { ascending: true }),
       ])
 
       if (clientsResult.error) {
@@ -194,9 +224,14 @@ export function ProformaInvoicesManager() {
         throw statusesResult.error
       }
 
+      if (departmentsResult.error) {
+        throw departmentsResult.error
+      }
+
       setClients((clientsResult.data ?? []) as ClientOption[])
       setInvoices((invoicesResult.data ?? []) as ProformaInvoiceRow[])
       setStatuses((statusesResult.data ?? []) as StatusOption[])
+      setDepartments((departmentsResult.data ?? []) as DepartmentOption[])
     } catch (error) {
       setLoadError(getErrorMessage(error, 'Unable to load proforma invoices.'))
     } finally {
@@ -210,11 +245,36 @@ export function ProformaInvoicesManager() {
     void loadData()
   }, [loadData])
 
+  // Keep dependent filters coherent when the client filter changes.
+  useEffect(() => {
+    if (!departmentFilter || departments.length === 0) {
+      return
+    }
+
+    const department = departments.find((item) => item.id === departmentFilter)
+
+    if (!department || (clientFilter && department.client_id !== clientFilter)) {
+      setDepartmentFilter('')
+    }
+  }, [clientFilter, departmentFilter, departments])
+
+  const filterDepartments = useMemo(() => {
+    if (!clientFilter) {
+      return departments
+    }
+
+    return departments.filter((department) => department.client_id === clientFilter)
+  }, [clientFilter, departments])
+
   const filteredInvoices = useMemo(() => {
     const term = query.trim().toLowerCase()
 
     return invoices.filter((invoice) => {
       if (clientFilter && invoice.client_id !== clientFilter) {
+        return false
+      }
+
+      if (departmentFilter && invoice.department_id !== departmentFilter) {
         return false
       }
 
@@ -229,13 +289,32 @@ export function ProformaInvoicesManager() {
       return [
         invoice.pi_number ?? '',
         invoice.client_id ? clientNames.get(invoice.client_id) ?? '' : '',
+        invoice.department_id ? departmentNames.get(invoice.department_id) ?? '' : '',
         invoice.status_code ?? '',
       ]
         .join(' ')
         .toLowerCase()
         .includes(term)
     })
-  }, [clientFilter, clientNames, invoices, query, statusFilter])
+  }, [
+    clientFilter,
+    clientNames,
+    departmentFilter,
+    departmentNames,
+    invoices,
+    query,
+    statusFilter,
+  ])
+
+  const invoiceGroups = useMemo(
+    () =>
+      groupInvoicesByClientAndDepartment(filteredInvoices, {
+        getClientId: (invoice) => invoice.client_id,
+        getDepartment: (invoice) => invoiceDepartmentRef(invoice.department_id, departmentNames),
+        clientNames,
+      }),
+    [clientNames, departmentNames, filteredInvoices]
+  )
 
   const summary = useMemo(() => {
     const total = roundMoney(
@@ -813,6 +892,150 @@ export function ProformaInvoicesManager() {
     URL.revokeObjectURL(url)
   }
 
+  function toggleClientGroup(key: string) {
+    setCollapsedClients((current) => toggleKey(current, key))
+  }
+
+  function toggleDepartmentGroup(key: string) {
+    setCollapsedDepartments((current) => toggleKey(current, key))
+  }
+
+  const allClientsCollapsed =
+    invoiceGroups.length > 0 && invoiceGroups.every((group) => collapsedClients.has(group.key))
+
+  function toggleAllGroups() {
+    if (allClientsCollapsed) {
+      setCollapsedClients(new Set())
+      setCollapsedDepartments(new Set())
+      return
+    }
+
+    setCollapsedClients(new Set(invoiceGroups.map((group) => group.key)))
+    setCollapsedDepartments(new Set())
+  }
+
+  function renderInvoiceRow(invoice: ProformaInvoiceRow) {
+    return (
+      <tr key={invoice.id} className="transition-colors hover:bg-slate-50/70">
+        <td className="whitespace-nowrap px-4 py-3">
+          <span className="font-mono text-xs font-medium text-slate-700">
+            {invoice.pi_number?.trim() || invoice.id.slice(0, 8).toUpperCase()}
+          </span>
+        </td>
+        <td className="whitespace-nowrap px-4 py-3 text-slate-600">
+          {formatDate(invoice.pi_date ?? invoice.invoice_date ?? invoice.created_at)}
+        </td>
+        <td className="px-4 py-3 font-medium text-slate-900">
+          {invoice.client_id ? clientNames.get(invoice.client_id) ?? 'Unknown client' : '—'}
+        </td>
+        <td className="px-4 py-3">
+          {invoice.status_code ? (
+            <span
+              className={`${badgeClass} ${
+                STATUS_TONES[invoice.status_code] ??
+                'bg-slate-100 text-slate-600 ring-slate-500/20'
+              }`}
+              title={statusLabels.get(invoice.status_code) ?? invoice.status_code}
+            >
+              {invoice.status_code}
+            </span>
+          ) : (
+            <span className="text-slate-400">—</span>
+          )}
+        </td>
+        <td className="whitespace-nowrap px-4 py-3 text-right tabular-nums text-slate-600">
+          {formatCurrency(invoice.subtotal)}
+        </td>
+        <td className="whitespace-nowrap px-4 py-3 text-right tabular-nums text-slate-600">
+          {formatCurrency(
+            invoice.tax_amount ??
+              Math.max(0, toNumber(invoice.grand_total) - toNumber(invoice.subtotal))
+          )}
+        </td>
+        <td className="whitespace-nowrap px-4 py-3 text-right font-semibold tabular-nums text-slate-900">
+          {formatCurrency(invoice.grand_total)}
+        </td>
+        <td className="px-4 py-3">
+          <div className="flex items-center justify-end gap-1">
+            <IconButton
+              label={`Manage articles on ${invoice.pi_number ?? 'invoice'}`}
+              tooltipText="Articles: add or remove linked requests"
+              tooltip="native"
+              variant="ghost"
+              size="sm"
+              icon={<ListChecks />}
+              onClick={() => {
+                setViewActionError(null)
+                setViewNotice(null)
+                setViewTarget(invoice)
+              }}
+            />
+            <IconButton
+              label={`View ${invoice.pi_number ?? 'invoice'}`}
+              tooltipText="View invoice"
+              tooltip="native"
+              variant="ghost"
+              size="sm"
+              icon={<Eye />}
+              onClick={() => setViewTarget(invoice)}
+            />
+            <IconButton
+              label={`Download ${invoice.pi_number ?? 'invoice'} as Word`}
+              tooltipText={
+                downloadingId === invoice.id
+                  ? 'Generating Word document…'
+                  : 'Download Word (.docx)'
+              }
+              tooltip="native"
+              variant="ghost"
+              size="sm"
+              icon={
+                downloadingId === invoice.id ? (
+                  <SpinnerIcon className="h-4 w-4" />
+                ) : (
+                  <Download />
+                )
+              }
+              disabled={downloadingId !== null}
+              onClick={() => void handleDownloadWord(invoice)}
+            />
+            <IconButton
+              label={`Edit ${invoice.pi_number ?? 'invoice'}`}
+              tooltipText={
+                invoice.tax_invoice_id
+                  ? 'Converted to a tax invoice – remove it from the tax invoice first'
+                  : 'Edit invoice details'
+              }
+              tooltip="native"
+              variant="ghost"
+              size="sm"
+              icon={<Pencil />}
+              disabled={Boolean(invoice.tax_invoice_id)}
+              onClick={() => openEditDialog(invoice)}
+            />
+            <IconButton
+              label={`Delete ${invoice.pi_number ?? 'invoice'}`}
+              tooltipText={
+                invoice.tax_invoice_id
+                  ? 'Remove this proforma invoice from its tax invoice first'
+                  : 'Delete invoice'
+              }
+              tooltip="native"
+              variant="danger"
+              size="sm"
+              icon={<Trash2 />}
+              disabled={Boolean(invoice.tax_invoice_id)}
+              onClick={() => {
+                setDeleteError(null)
+                setDeleteTarget(invoice)
+              }}
+            />
+          </div>
+        </td>
+      </tr>
+    )
+  }
+
   return (
     <div className="space-y-5">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
@@ -875,13 +1098,13 @@ export function ProformaInvoicesManager() {
               type="search"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="Search invoice number or client"
+              placeholder="Search invoice number, client or department"
               aria-label="Search proforma invoices"
               className={`${inputClass} pl-9`}
             />
           </div>
 
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+          <div className="flex flex-wrap items-center gap-2">
             <label className="sr-only" htmlFor="pi-client-filter">
               Filter by client
             </label>
@@ -889,12 +1112,29 @@ export function ProformaInvoicesManager() {
               id="pi-client-filter"
               value={clientFilter}
               onChange={(event) => setClientFilter(event.target.value)}
-              className={`${inputClass} sm:w-48`}
+              className={`${inputClass} w-full sm:w-44`}
             >
               <option value="">All clients</option>
               {clients.map((client) => (
                 <option key={client.id} value={client.id}>
                   {client.company_name}
+                </option>
+              ))}
+            </select>
+
+            <label className="sr-only" htmlFor="pi-department-filter">
+              Filter by department
+            </label>
+            <select
+              id="pi-department-filter"
+              value={departmentFilter}
+              onChange={(event) => setDepartmentFilter(event.target.value)}
+              className={`${inputClass} w-full sm:w-44`}
+            >
+              <option value="">All departments</option>
+              {filterDepartments.map((department) => (
+                <option key={department.id} value={department.id}>
+                  {department.department_name}
                 </option>
               ))}
             </select>
@@ -906,7 +1146,7 @@ export function ProformaInvoicesManager() {
               id="pi-status-filter"
               value={statusFilter}
               onChange={(event) => setStatusFilter(event.target.value)}
-              className={`${inputClass} sm:w-44`}
+              className={`${inputClass} w-full sm:w-40`}
             >
               <option value="">All statuses</option>
               {statuses.map((status) => (
@@ -915,6 +1155,37 @@ export function ProformaInvoicesManager() {
                 </option>
               ))}
             </select>
+
+            <button
+              type="button"
+              onClick={() => setGrouped((value) => !value)}
+              aria-pressed={grouped}
+              aria-label={grouped ? 'Show a flat list' : 'Group by client and department'}
+              title={grouped ? 'Show a flat list' : 'Group by client and department'}
+              className={`${secondaryButtonClass} px-2.5 py-2`}
+            >
+              <Layers className="h-4 w-4" />
+              <span className="hidden lg:inline">{grouped ? 'Grouped' : 'Flat'}</span>
+            </button>
+
+            {grouped && (
+              <button
+                type="button"
+                onClick={toggleAllGroups}
+                aria-label={allClientsCollapsed ? 'Expand all groups' : 'Collapse all groups'}
+                title={allClientsCollapsed ? 'Expand all groups' : 'Collapse all groups'}
+                className={`${secondaryButtonClass} px-2.5 py-2`}
+              >
+                {allClientsCollapsed ? (
+                  <ChevronsUpDown className="h-4 w-4" />
+                ) : (
+                  <ChevronsDownUp className="h-4 w-4" />
+                )}
+                <span className="hidden lg:inline">
+                  {allClientsCollapsed ? 'Expand all' : 'Collapse all'}
+                </span>
+              </button>
+            )}
 
             <button
               type="button"
@@ -1006,130 +1277,81 @@ export function ProformaInvoicesManager() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {filteredInvoices.map((invoice) => (
-                  <tr key={invoice.id} className="transition-colors hover:bg-slate-50/70">
-                    <td className="whitespace-nowrap px-4 py-3">
-                      <span className="font-mono text-xs font-medium text-slate-700">
-                        {invoice.pi_number?.trim() || invoice.id.slice(0, 8).toUpperCase()}
-                      </span>
-                    </td>
-                    <td className="whitespace-nowrap px-4 py-3 text-slate-600">
-                      {formatDate(invoice.pi_date ?? invoice.invoice_date ?? invoice.created_at)}
-                    </td>
-                    <td className="px-4 py-3 font-medium text-slate-900">
-                      {invoice.client_id
-                        ? clientNames.get(invoice.client_id) ?? 'Unknown client'
-                        : '—'}
-                    </td>
-                    <td className="px-4 py-3">
-                      {invoice.status_code ? (
-                        <span
-                          className={`${badgeClass} ${
-                            STATUS_TONES[invoice.status_code] ??
-                            'bg-slate-100 text-slate-600 ring-slate-500/20'
-                          }`}
-                          title={statusLabels.get(invoice.status_code) ?? invoice.status_code}
-                        >
-                          {invoice.status_code}
-                        </span>
-                      ) : (
-                        <span className="text-slate-400">—</span>
-                      )}
-                    </td>
-                    <td className="whitespace-nowrap px-4 py-3 text-right tabular-nums text-slate-600">
-                      {formatCurrency(invoice.subtotal)}
-                    </td>
-                    <td className="whitespace-nowrap px-4 py-3 text-right tabular-nums text-slate-600">
-                      {formatCurrency(
-                        invoice.tax_amount ??
-                          Math.max(
-                            0,
-                            toNumber(invoice.grand_total) - toNumber(invoice.subtotal)
-                          )
-                      )}
-                    </td>
-                    <td className="whitespace-nowrap px-4 py-3 text-right font-semibold tabular-nums text-slate-900">
-                      {formatCurrency(invoice.grand_total)}
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center justify-end gap-1">
-                        <IconButton
-                          label={`Manage articles on ${invoice.pi_number ?? 'invoice'}`}
-                          tooltipText="Articles: add or remove linked requests"
-                          tooltip="native"
-                          variant="ghost"
-                          size="sm"
-                          icon={<ListChecks />}
-                          onClick={() => {
-                            setViewActionError(null)
-                            setViewNotice(null)
-                            setViewTarget(invoice)
-                          }}
-                        />
-                        <IconButton
-                          label={`View ${invoice.pi_number ?? 'invoice'}`}
-                          tooltipText="View invoice"
-                          tooltip="native"
-                          variant="ghost"
-                          size="sm"
-                          icon={<Eye />}
-                          onClick={() => setViewTarget(invoice)}
-                        />
-                        <IconButton
-                          label={`Download ${invoice.pi_number ?? 'invoice'} as Word`}
-                          tooltipText={
-                            downloadingId === invoice.id
-                              ? 'Generating Word document…'
-                              : 'Download Word (.docx)'
-                          }
-                          tooltip="native"
-                          variant="ghost"
-                          size="sm"
-                          icon={
-                            downloadingId === invoice.id ? (
-                              <SpinnerIcon className="h-4 w-4" />
-                            ) : (
-                              <Download />
-                            )
-                          }
-                          disabled={downloadingId !== null}
-                          onClick={() => void handleDownloadWord(invoice)}
-                        />
-                        <IconButton
-                          label={`Edit ${invoice.pi_number ?? 'invoice'}`}
-                          tooltipText={
-                            invoice.tax_invoice_id
-                              ? 'Converted to a tax invoice – remove it from the tax invoice first'
-                              : 'Edit invoice details'
-                          }
-                          tooltip="native"
-                          variant="ghost"
-                          size="sm"
-                          icon={<Pencil />}
-                          disabled={Boolean(invoice.tax_invoice_id)}
-                          onClick={() => openEditDialog(invoice)}
-                        />
-                        <IconButton
-                          label={`Delete ${invoice.pi_number ?? 'invoice'}`}
-                          tooltipText={
-                            invoice.tax_invoice_id
-                              ? 'Remove this proforma invoice from its tax invoice first'
-                              : 'Delete invoice'
-                          }
-                          tooltip="native"
-                          variant="danger"
-                          size="sm"
-                          icon={<Trash2 />}
-                          disabled={Boolean(invoice.tax_invoice_id)}
-                          onClick={() => {
-                            setDeleteError(null)
-                            setDeleteTarget(invoice)
-                          }}
-                        />
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+                {grouped
+                  ? invoiceGroups.map((client) => {
+                      const clientCollapsed = collapsedClients.has(client.key)
+
+                      return (
+                        <Fragment key={client.key}>
+                          <tr className="bg-slate-100/80">
+                            <td colSpan={8} className="p-0">
+                              <button
+                                type="button"
+                                onClick={() => toggleClientGroup(client.key)}
+                                aria-expanded={!clientCollapsed}
+                                className="flex w-full flex-wrap items-center gap-2 px-4 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-700 transition-colors hover:bg-slate-200/70"
+                              >
+                                {clientCollapsed ? (
+                                  <ChevronRight className="h-4 w-4 shrink-0 text-slate-500" />
+                                ) : (
+                                  <ChevronDown className="h-4 w-4 shrink-0 text-slate-500" />
+                                )}
+                                <span>{client.clientLabel}</span>
+                                <span className="rounded-full bg-white px-2 py-0.5 text-[11px] font-medium normal-case tracking-normal text-slate-500 ring-1 ring-inset ring-slate-200">
+                                  {client.invoiceCount} invoice
+                                  {client.invoiceCount === 1 ? '' : 's'}
+                                </span>
+                                <span className="ml-auto text-[11px] font-semibold normal-case tracking-normal tabular-nums text-slate-600">
+                                  {formatCurrency(
+                                    sumGrandTotals(
+                                      client.departments.flatMap(
+                                        (department) => department.invoices
+                                      )
+                                    )
+                                  )}
+                                </span>
+                              </button>
+                            </td>
+                          </tr>
+                          {!clientCollapsed &&
+                            client.departments.map((department) => {
+                              const departmentCollapsed = collapsedDepartments.has(department.key)
+
+                              return (
+                                <Fragment key={department.key}>
+                                  <tr className="bg-slate-50">
+                                    <td colSpan={8} className="p-0">
+                                      <button
+                                        type="button"
+                                        onClick={() => toggleDepartmentGroup(department.key)}
+                                        aria-expanded={!departmentCollapsed}
+                                        className="flex w-full flex-wrap items-center gap-2 py-1.5 pl-9 pr-4 text-left text-xs font-medium text-slate-600 transition-colors hover:bg-slate-100"
+                                      >
+                                        {departmentCollapsed ? (
+                                          <ChevronRight className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+                                        ) : (
+                                          <ChevronDown className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+                                        )}
+                                        <span>{department.department.label}</span>
+                                        <span className="rounded-full bg-white px-2 py-0.5 text-[11px] font-normal text-slate-500 ring-1 ring-inset ring-slate-200">
+                                          {department.invoiceCount} invoice
+                                          {department.invoiceCount === 1 ? '' : 's'}
+                                        </span>
+                                        <span className="ml-auto text-[11px] font-semibold tabular-nums text-slate-600">
+                                          {formatCurrency(sumGrandTotals(department.invoices))}
+                                        </span>
+                                      </button>
+                                    </td>
+                                  </tr>
+                                  {!departmentCollapsed &&
+                                    department.invoices.map(renderInvoiceRow)}
+                                </Fragment>
+                              )
+                            })}
+                        </Fragment>
+                      )
+                    })
+                  : filteredInvoices.map(renderInvoiceRow)}
               </tbody>
             </table>
           </div>
@@ -1699,6 +1921,22 @@ function toNumber(value: unknown): number {
   }
 
   return 0
+}
+
+function sumGrandTotals(invoices: ProformaInvoiceRow[]): number {
+  return invoices.reduce((sum, invoice) => sum + toNumber(invoice.grand_total), 0)
+}
+
+function toggleKey(current: Set<string>, key: string): Set<string> {
+  const next = new Set(current)
+
+  if (next.has(key)) {
+    next.delete(key)
+  } else {
+    next.add(key)
+  }
+
+  return next
 }
 
 function today(): string {
