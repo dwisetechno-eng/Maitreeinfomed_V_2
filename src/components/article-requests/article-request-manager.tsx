@@ -47,7 +47,11 @@ import {
   type ArticleRequestRow,
 } from '@/lib/article-request-meta'
 import { deriveArticleStatus } from '@/lib/invoice-links'
-import { isMissingColumnError, isMissingTableError } from '@/lib/supabase-errors'
+import {
+  extractMissingColumnName,
+  isMissingColumnError,
+  isMissingTableError,
+} from '@/lib/supabase-errors'
 import { createClient } from '@/utils/supabase/client'
 
 type ClientRow = { id: string; company_name: string }
@@ -91,6 +95,7 @@ type ArticleRow = {
   created_at: string | null
   batch_id?: string | null
   batch_tag?: string | null
+  sr_no?: number | null
 }
 
 type FormState = {
@@ -99,6 +104,7 @@ type FormState = {
   contact_id: string
   article_description: string
   vendor_id: string
+  sr_no: string
   cost_price: string
   quantity: string
   urgency: string
@@ -132,6 +138,7 @@ const EMPTY_FORM: FormState = {
   contact_id: '',
   article_description: '',
   vendor_id: '',
+  sr_no: '',
   cost_price: '0',
   quantity: '1',
   urgency: 'MEDIUM',
@@ -469,6 +476,7 @@ export function ArticleRequestManager() {
         departmentNames.get(article.department_id ?? '') ?? '',
         vendorNames.get(article.vendor_id ?? '') ?? '',
         article.contact_id ? contactNames.get(article.contact_id) ?? '' : '',
+        article.sr_no != null ? String(article.sr_no) : '',
       ]
         .join(' ')
         .toLowerCase()
@@ -678,6 +686,7 @@ export function ArticleRequestManager() {
       contact_id: row.contact_id ?? '',
       article_description: displayDescription(row),
       vendor_id: row.vendor_id ?? '',
+      sr_no: row.sr_no != null ? String(row.sr_no) : '',
       cost_price: String(unitCost(row)),
       quantity: String(unitQuantity(row)),
       urgency: normalizeUrgency(row.urgency),
@@ -743,6 +752,7 @@ export function ArticleRequestManager() {
     const description = form.article_description.trim()
     const costPrice = Number(form.cost_price)
     const quantity = Number(form.quantity)
+    const srNo = form.sr_no.trim() === '' ? null : Number(form.sr_no)
 
     if (!form.client_id) {
       setFormError('Select a client for this article request.')
@@ -764,6 +774,11 @@ export function ArticleRequestManager() {
       return
     }
 
+    if (srNo !== null && (!Number.isInteger(srNo) || srNo < 1)) {
+      setFormError('Sr No must be a whole number of 1 or more.')
+      return
+    }
+
     if (!hasSupabaseEnv()) {
       setFormError(SUPABASE_SETUP_MESSAGE)
       return
@@ -777,6 +792,7 @@ export function ArticleRequestManager() {
       department_id: form.department_id || null,
       vendor_id: form.vendor_id || null,
       article_description: description,
+      sr_no: srNo,
       cost_price: roundMoney(costPrice),
       quantity: Math.trunc(quantity),
       urgency: form.urgency,
@@ -792,14 +808,25 @@ export function ArticleRequestManager() {
           ? supabase.from('article_requests').update(body).eq('id', dialog.row.id)
           : supabase.from('article_requests').insert(body)
 
-      let result = await runSave({ ...payload, contact_id: form.contact_id || null })
+      // Optional columns may not exist until the latest migration has run;
+      // drop only the column the database names, then retry.
+      const optionalColumns = new Set(['contact_id', 'sr_no'])
+      const saveBody: Record<string, unknown> = {
+        ...payload,
+        contact_id: form.contact_id || null,
+      }
 
-      if (result.error && isMissingColumnError(result.error)) {
-        const { contact_id: _contactId, ...withoutContact } = {
-          ...payload,
-          contact_id: form.contact_id || null,
+      let result = await runSave(saveBody)
+
+      while (result.error && isMissingColumnError(result.error)) {
+        const missing = extractMissingColumnName(result.error)
+
+        if (!missing || !optionalColumns.has(missing) || !(missing in saveBody)) {
+          break
         }
-        result = await runSave(withoutContact)
+
+        delete saveBody[missing]
+        result = await runSave(saveBody)
       }
 
       if (result.error) {
@@ -1020,6 +1047,9 @@ export function ArticleRequestManager() {
           ) : (
             <span className="text-slate-400">—</span>
           )}
+        </td>
+        <td className="whitespace-nowrap px-3 py-3 text-right tabular-nums text-slate-600">
+          {article.sr_no != null ? article.sr_no : '—'}
         </td>
         <td className="max-w-[18rem] px-3 py-3">
           <p className="truncate font-medium text-slate-900" title={displayDescription(article)}>
@@ -1440,7 +1470,7 @@ export function ArticleRequestManager() {
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="min-w-[1350px] divide-y divide-slate-200 text-sm">
+            <table className="min-w-[1400px] divide-y divide-slate-200 text-sm">
               <caption className="sr-only">Article requests</caption>
               <thead className="bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
                 <tr>
@@ -1467,6 +1497,9 @@ export function ArticleRequestManager() {
                   </th>
                   <th scope="col" className="px-3 py-3">
                     Batch
+                  </th>
+                  <th scope="col" className="px-3 py-3 text-right">
+                    Sr No
                   </th>
                   <th scope="col" className="px-3 py-3">
                     Article
@@ -1500,7 +1533,7 @@ export function ArticleRequestManager() {
                       <Fragment key={client.key}>
                         <tr className="bg-slate-100/80">
                           <td
-                            colSpan={14}
+                            colSpan={15}
                             className="px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-700"
                           >
                             {client.clientLabel}
@@ -1510,7 +1543,7 @@ export function ArticleRequestManager() {
                           <Fragment key={department.key}>
                             <tr className="bg-slate-50">
                               <td
-                                colSpan={14}
+                                colSpan={15}
                                 className="px-3 py-1.5 pl-8 text-xs font-medium text-slate-500"
                               >
                                 {department.departmentLabel}
@@ -1652,7 +1685,23 @@ export function ArticleRequestManager() {
             />
           </div>
 
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+            <div>
+              <label htmlFor="article-sr-no" className={labelClass}>
+                Sr No (batch)
+              </label>
+              <input
+                id="article-sr-no"
+                type="number"
+                min={1}
+                step={1}
+                value={form.sr_no}
+                onChange={(event) => updateForm('sr_no', event.target.value)}
+                placeholder="Optional"
+                className={`${inputClass} tabular-nums`}
+              />
+            </div>
+
             <div>
               <label htmlFor="article-cost" className={labelClass}>
                 Cost price (₹)
@@ -1772,6 +1821,7 @@ export function ArticleRequestManager() {
           id: article.id,
           description: displayDescription(article),
           amount: roundMoney(unitCost(article) * unitQuantity(article)),
+          departmentId: article.department_id,
         }))}
         onAssigned={async (message) => {
           setAssignOpen(false)

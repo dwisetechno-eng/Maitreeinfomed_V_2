@@ -2,11 +2,12 @@
 
 import ExcelJS from 'exceljs'
 
+import { assignMissingSrNumbers } from '@/lib/article-sr-no'
 import {
   encodeArticleRequestNotes,
   type ArticleRequestMeta,
 } from '@/lib/article-request-meta'
-import { isMissingColumnError } from '@/lib/supabase-errors'
+import { extractMissingColumnName, isMissingColumnError } from '@/lib/supabase-errors'
 import { createClient } from '@/utils/supabase/server'
 
 export type ImportedArticle = {
@@ -40,12 +41,13 @@ export type ImportResult =
       error: string
     }
 
-type Field = 'title' | 'vendor' | 'quantity' | 'rate' | 'date' | 'notes' | 'doi'
+type Field = 'srNo' | 'title' | 'vendor' | 'quantity' | 'rate' | 'date' | 'notes' | 'doi'
 
 type ColumnMap = Partial<Record<Field, number>>
 
 type ParsedRow = {
   rowNumber: number
+  srNo: number | null
   title: string
   vendorName: string | null
   quantity: number
@@ -55,6 +57,7 @@ type ParsedRow = {
 }
 
 const HEADER_ALIASES: Record<Field, string[]> = {
+  srNo: ['srno', 'srnumber', 'slno', 'serialno', 'serialnumber', 'sno'],
   title: [
     'article',
     'articletitle',
@@ -103,6 +106,7 @@ const OPTIONAL_IMPORT_COLUMNS = [
   'batch_tag',
   'contact_id',
   'department_id',
+  'sr_no',
 ] as const
 
 const MAX_IMPORT_ROWS = 2000
@@ -293,6 +297,7 @@ export async function importArticleBatch(formData: FormData): Promise<ImportResu
       cost_price: row.rate,
       rate: row.rate,
       quantity: row.quantity,
+      sr_no: row.srNo,
       request_date: row.requestDate ?? today(),
       notes: encodeArticleRequestNotes(meta[index]),
       batch_id: batchId,
@@ -384,7 +389,7 @@ async function insertWithColumnFallback(
       return { rows: [], error, usedFallbackColumns }
     }
 
-    const missing = extractMissingColumn(error)
+    const missing = extractMissingColumnName(error)
 
     if (missing && isOptionalImportColumn(missing)) {
       for (const row of rows) {
@@ -417,23 +422,6 @@ async function insertWithColumnFallback(
 
 function isOptionalImportColumn(column: string): boolean {
   return (OPTIONAL_IMPORT_COLUMNS as readonly string[]).includes(column)
-}
-
-function extractMissingColumn(error: unknown): string | null {
-  if (!error || typeof error !== 'object') {
-    return null
-  }
-
-  const message = (error as { message?: string }).message ?? ''
-  const postgresMatch = /column\s+[^\s.]+\.([a-zA-Z0-9_]+)\s+does not exist/i.exec(message)
-
-  if (postgresMatch) {
-    return postgresMatch[1]
-  }
-
-  const cacheMatch = /could not find the '([^']+)' column/i.exec(message)
-
-  return cacheMatch?.[1] ?? null
 }
 
 function resolveHeaderRow(sheet: ExcelJS.Worksheet): { rowNumber: number; columns: ColumnMap } | null {
@@ -486,6 +474,7 @@ function parseRows(
     const notesCell = readColumn(row, header.columns.notes)
     const vendorCell = readColumn(row, header.columns.vendor)
     const doiCell = readColumn(row, header.columns.doi)
+    const srNoCell = readColumn(row, header.columns.srNo)
 
     const title = titleCell || notesCell
     const vendorName = vendorCell ? vendorCell.replace(/\s+/g, ' ').trim() : null
@@ -508,6 +497,7 @@ function parseRows(
 
     rows.push({
       rowNumber,
+      srNo: parsePositiveInteger(srNoCell),
       title,
       vendorName: vendorName || null,
       quantity: quantityValue && quantityValue > 0 ? Math.trunc(quantityValue) : 1,
@@ -516,6 +506,10 @@ function parseRows(
       remarks: remarks || null,
     })
   }
+
+  // Rows without an explicit serial number are numbered 1, 2, 3… within the
+  // batch, skipping any numbers the sheet already used.
+  assignMissingSrNumbers(rows)
 
   return { rows, skipped }
 }
@@ -589,6 +583,18 @@ function parseNumber(value: string): number | null {
   return Number.isFinite(parsed) ? parsed : null
 }
 
+function parsePositiveInteger(value: string): number | null {
+  const parsed = parseNumber(value)
+
+  if (parsed == null) {
+    return null
+  }
+
+  const integer = Math.trunc(parsed)
+
+  return integer >= 1 ? integer : null
+}
+
 function parseDate(value: string): string | null {
   if (!value) {
     return null
@@ -647,6 +653,7 @@ export async function downloadImportTemplate(): Promise<
     const sampleDate = today()
 
     sheet.columns = [
+      { header: 'Sr No', key: 'srNo', width: 8 },
       { header: 'Article', key: 'article', width: 42 },
       { header: 'Vendor', key: 'vendor', width: 20 },
       { header: 'Quantity', key: 'quantity', width: 12 },
@@ -656,6 +663,7 @@ export async function downloadImportTemplate(): Promise<
     ]
 
     sheet.addRow({
+      srNo: 1,
       article: 'Sample scientific article title',
       vendor: 'ABC Ltd',
       quantity: 1,
@@ -664,6 +672,7 @@ export async function downloadImportTemplate(): Promise<
       remarks: 'Sample remarks',
     })
     sheet.addRow({
+      srNo: 2,
       article: 'Another article title',
       vendor: 'InfoSolutions',
       quantity: 2,
@@ -693,6 +702,13 @@ export async function downloadImportTemplate(): Promise<
     ]
 
     instructions.addRows([
+      {
+        column: 'Sr No',
+        required: 'No',
+        aliases: 'Sr. No, Sl No, Serial No, S No',
+        notes:
+          'Serial number of the article within this batch. Blank rows get the lowest unused numbers in row order.',
+      },
       {
         column: 'Article',
         required: 'Yes',
@@ -877,6 +893,7 @@ export async function exportArticles(
       { header: 'Vendor', key: 'vendor', width: 20 },
       { header: 'Contact', key: 'contact', width: 20 },
       { header: 'Batch', key: 'batch', width: 18 },
+      { header: 'Sr No', key: 'srNo', width: 8 },
       { header: 'Cost', key: 'cost', width: 12 },
       { header: 'Qty', key: 'qty', width: 8 },
       { header: 'Total cost', key: 'totalCost', width: 14 },
@@ -912,6 +929,7 @@ export async function exportArticles(
         vendor: row.vendor_id ? vendorNames.get(String(row.vendor_id)) ?? '' : '',
         contact: row.contact_id ? contactNames.get(String(row.contact_id)) ?? '' : '',
         batch: String(row.batch_tag ?? row.batch_id ?? '').trim(),
+        srNo: row.sr_no != null ? Number(row.sr_no) : '',
         cost: Number(row.cost_price ?? 0),
         qty: Number(row.quantity ?? 1),
         totalCost: Number(row.total_cost ?? 0),

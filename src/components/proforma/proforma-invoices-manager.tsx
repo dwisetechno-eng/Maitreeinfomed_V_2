@@ -84,6 +84,7 @@ type LinkedArticle = ArticleRequestRow
 type EditForm = {
   pi_number: string
   pi_date: string
+  department_id: string
   status_code: string
   subtotal: string
   tax_rate: string
@@ -100,6 +101,7 @@ const STATUS_TONES: Record<string, string> = {
 const EMPTY_EDIT_FORM: EditForm = {
   pi_number: '',
   pi_date: '',
+  department_id: '',
   status_code: '',
   subtotal: '0',
   tax_rate: '18',
@@ -179,6 +181,16 @@ export function ProformaInvoicesManager() {
     }
     return map
   }, [departments])
+
+  const editDepartmentOptions = useMemo(() => {
+    if (!editTarget?.client_id) {
+      return []
+    }
+
+    return departments.filter(
+      (department) => department.client_id === editTarget.client_id
+    )
+  }, [departments, editTarget?.client_id])
 
   const loadData = useCallback(async (options?: { silent?: boolean }) => {
     if (!options?.silent) {
@@ -626,6 +638,7 @@ export function ProformaInvoicesManager() {
     setEditForm({
       pi_number: row.pi_number ?? '',
       pi_date: (row.pi_date ?? row.invoice_date ?? today()).slice(0, 10),
+      department_id: row.department_id ?? '',
       status_code: row.status_code ?? '',
       subtotal: String(toNumber(row.subtotal)),
       tax_rate: String(toNumber(row.tax_rate ?? 18)),
@@ -695,6 +708,7 @@ export function ProformaInvoicesManager() {
       pi_number: piNumber,
       pi_date: editForm.pi_date,
       invoice_date: editForm.pi_date,
+      department_id: editForm.department_id || null,
       status_code: editForm.status_code || null,
       subtotal: roundMoney(safeEditSubtotal),
       tax_rate: safeEditTaxRate,
@@ -1394,6 +1408,14 @@ export function ProformaInvoicesManager() {
                     : '—'
                 }
               />
+              <Detail
+                label="Department"
+                value={
+                  viewTarget.department_id
+                    ? departmentNames.get(viewTarget.department_id) ?? 'Unknown department'
+                    : '—'
+                }
+              />
               <Detail label="Status" value={viewTarget.status_code ?? '—'} />
               <Detail label="Subtotal" value={formatCurrency(viewTarget.subtotal)} />
               <Detail
@@ -1648,7 +1670,7 @@ export function ProformaInvoicesManager() {
         }}
         size="2xl"
         title={`Edit proforma invoice ${editTarget?.pi_number ?? ''}`}
-        description="Update the invoice number, date, status and pricing. Use Manage article requests to add or remove the requests linked to this invoice."
+        description="Update the invoice number, date, department, status and pricing. Use Manage article requests to add or remove the requests linked to this invoice."
       >
         <form onSubmit={handleEditSubmit} className="space-y-4">
           {editError && <Alert tone="error">{editError}</Alert>}
@@ -1683,23 +1705,47 @@ export function ProformaInvoicesManager() {
             </div>
           </div>
 
-          <div>
-            <label htmlFor="edit-pi-status" className={labelClass}>
-              Status
-            </label>
-            <select
-              id="edit-pi-status"
-              value={editForm.status_code}
-              onChange={(event) => updateEditForm('status_code', event.target.value)}
-              className={inputClass}
-            >
-              <option value="">Unassigned</option>
-              {statuses.map((status) => (
-                <option key={status.status_code} value={status.status_code}>
-                  {status.status_label}
-                </option>
-              ))}
-            </select>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div>
+              <label htmlFor="edit-pi-status" className={labelClass}>
+                Status
+              </label>
+              <select
+                id="edit-pi-status"
+                value={editForm.status_code}
+                onChange={(event) => updateEditForm('status_code', event.target.value)}
+                className={inputClass}
+              >
+                <option value="">Unassigned</option>
+                {statuses.map((status) => (
+                  <option key={status.status_code} value={status.status_code}>
+                    {status.status_label}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label htmlFor="edit-pi-department" className={labelClass}>
+                Department
+              </label>
+              <select
+                id="edit-pi-department"
+                value={editForm.department_id}
+                onChange={(event) => updateEditForm('department_id', event.target.value)}
+                className={inputClass}
+              >
+                <option value="">No department</option>
+                {editDepartmentOptions.map((department) => (
+                  <option key={department.id} value={department.id}>
+                    {department.department_name}
+                  </option>
+                ))}
+              </select>
+              <p className="mt-1 text-xs text-slate-500">
+                Drives the department grouping in this list.
+              </p>
+            </div>
           </div>
 
           <div className="grid gap-4 sm:grid-cols-2">
@@ -1823,7 +1869,7 @@ async function updateWithColumnFallback(
   baseBody: Record<string, unknown>
 ): Promise<unknown | null> {
   const body = { ...baseBody }
-  const fallbacks = ['tax_rate', 'tax_amount', 'pi_date', 'status_code']
+  const fallbacks = ['department_id', 'tax_rate', 'tax_amount', 'pi_date', 'status_code']
 
   for (let attempt = 0; attempt < fallbacks.length + 3; attempt += 1) {
     const { error } = await supabase

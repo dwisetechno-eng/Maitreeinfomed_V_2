@@ -101,6 +101,8 @@ export type ArticleRequestRow = {
   cost_price?: number | null
   batch_id?: string | null
   batch_tag?: string | null
+  /** Serial number of the article within its imported batch. */
+  sr_no?: number | null
 }
 
 export function getArticleTitle(row: ArticleRequestRow): string {

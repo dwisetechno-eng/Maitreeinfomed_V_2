@@ -26,6 +26,8 @@ export type AssignableArticle = {
   id: string
   description: string
   amount: number
+  /** Department of the article request, used to seed a new proforma invoice. */
+  departmentId?: string | null
 }
 
 type ExistingProforma = {
@@ -176,6 +178,18 @@ export function AssignProformaDialog({
     [articles]
   )
 
+  // A new proforma invoice can carry a department only when every selected
+  // request belongs to the same one; otherwise the invoice stays unassigned.
+  const sharedDepartmentId = useMemo(() => {
+    if (articles.length === 0 || articles.some((article) => !article.departmentId)) {
+      return null
+    }
+
+    const ids = new Set(articles.map((article) => article.departmentId as string))
+
+    return ids.size === 1 ? [...ids][0] : null
+  }, [articles])
+
   const numericTaxRate = Number(taxRate)
   const safeTaxRate =
     Number.isFinite(numericTaxRate) && numericTaxRate >= 0 ? numericTaxRate : 0
@@ -261,6 +275,7 @@ export function AssignProformaDialog({
       } else {
         const created = await createProformaInvoice(supabase, {
           clientId,
+          departmentId: sharedDepartmentId,
           subtotal,
           taxRate: safeTaxRate,
           taxAmount,
