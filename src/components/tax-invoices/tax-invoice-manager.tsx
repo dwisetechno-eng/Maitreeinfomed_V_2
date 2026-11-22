@@ -17,7 +17,7 @@ import {
   Trash2,
 } from 'lucide-react'
 
-import { downloadTaxInvoiceDocument } from '@/actions/invoice-documents'
+import { downloadTaxInvoiceDocument, downloadTaxInvoiceProofDocument } from '@/actions/invoice-documents'
 
 import {
   SUPABASE_SETUP_MESSAGE,
@@ -123,6 +123,7 @@ export function TaxInvoiceManager() {
   const [deleteError, setDeleteError] = useState<string | null>(null)
   const [deleting, setDeleting] = useState(false)
   const [downloadingId, setDownloadingId] = useState<string | null>(null)
+  const [downloadingProofId, setDownloadingProofId] = useState<string | null>(null)
 
   const clientNames = useMemo(() => {
     const map = new Map<string, string>()
@@ -688,6 +689,37 @@ export function TaxInvoiceManager() {
     }
   }
 
+  async function handleDownloadProof(invoice: InvoiceWithLinks) {
+    if (downloadingProofId) {
+      return
+    }
+
+    setDownloadingProofId(invoice.id)
+    setNotice(null)
+
+    try {
+      const result = await downloadTaxInvoiceProofDocument(invoice.id)
+
+      if (!result.ok) {
+        setNotice({ tone: 'error', message: result.error })
+        return
+      }
+
+      downloadBase64(result.base64, result.filename, result.mimeType)
+      setNotice({
+        tone: 'success',
+        message: `Downloaded PROOF - ${invoice.tax_invoice_number?.trim() || 'tax invoice'} as a PDF.`,
+      })
+    } catch (downloadError) {
+      setNotice({
+        tone: 'error',
+        message: getErrorMessage(downloadError, 'Could not generate the proof PDF.'),
+      })
+    } finally {
+      setDownloadingProofId(null)
+    }
+  }
+
   function downloadBase64(base64: string, filename: string, mimeType: string) {
     const binary = atob(base64)
     const bytes = new Uint8Array(binary.length)
@@ -925,11 +957,11 @@ export function TaxInvoiceManager() {
               icon={<Eye />}
               onClick={() => setViewTarget(invoice)}
             />
-            <IconButton
+                        <IconButton
               label={`Download ${invoice.tax_invoice_number ?? 'tax invoice'} as Word`}
               tooltipText={
                 downloadingId === invoice.id
-                  ? 'Generating Word document…'
+                  ? 'Generating Word document...'
                   : 'Download Word (.docx)'
               }
               tooltip="native"
@@ -942,8 +974,28 @@ export function TaxInvoiceManager() {
                   <Download />
                 )
               }
-              disabled={downloadingId !== null}
+              disabled={downloadingId === invoice.id}
               onClick={() => void handleDownloadWord(invoice)}
+            />
+            <IconButton
+              label={`Download PROOF - ${invoice.tax_invoice_number ?? 'tax invoice'} as PDF`}
+              tooltipText={
+                downloadingProofId === invoice.id
+                  ? 'Generating proof PDF...'
+                  : 'Download PROOF PDF (Sr No + Description)'
+              }
+              tooltip="native"
+              variant="ghost"
+              size="sm"
+              icon={
+                downloadingProofId === invoice.id ? (
+                  <SpinnerIcon className="h-4 w-4" />
+                ) : (
+                  <Download />
+                )
+              }
+              disabled={downloadingProofId === invoice.id}
+              onClick={() => void handleDownloadProof(invoice)}
             />
             <IconButton
               label={`Edit ${invoice.tax_invoice_number ?? 'tax invoice'}`}
