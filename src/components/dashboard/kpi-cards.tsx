@@ -55,7 +55,7 @@ export function KpiCards({
         tone="sky"
       />
 
-      <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+      <article className="rounded-2xl border border-amber-100 bg-amber-50/35 p-5 shadow-sm">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <Link
@@ -132,8 +132,17 @@ function KpiCard({
   const toneClasses =
     tone === 'brand' ? 'bg-brand-50 text-brand-700' : 'bg-sky-50 text-sky-700'
 
+  const cardTone =
+    tone === 'brand'
+      ? 'border-brand-100 bg-brand-50/40 hover:border-brand-200 hover:bg-brand-50/70'
+      : 'border-sky-100 bg-sky-50/40 hover:border-sky-200 hover:bg-sky-50/70'
+
   return (
-    <Link href={href} className={cardLinkClass} title={`Open ${label.toLowerCase()}`}>
+    <Link
+      href={href}
+      className={`group block rounded-2xl border p-5 shadow-sm transition hover:shadow-md focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 ${cardTone}`}
+      title={`Open ${label.toLowerCase()}`}
+    >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="flex items-center gap-1 text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
@@ -149,7 +158,7 @@ function KpiCard({
         </div>
 
         <span
-          className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${toneClasses}`}
+          className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/80 ${toneClasses}`}
         >
           {icon}
         </span>

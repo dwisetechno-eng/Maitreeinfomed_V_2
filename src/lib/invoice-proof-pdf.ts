@@ -131,38 +131,39 @@ export async function renderTaxInvoiceProofPdf(data: InvoiceDocumentData): Promi
   }
 
   drawBox(page, MARGIN + colW, y, colW, detailH)
-  drawLabel(page, ' ', MARGIN + colW + 10, y - 16, bold)
-  const detailLines = data.purchaseArticlesLine
-    .split(/\r?\n/)
-    .map((v) => v.trim())
-    .filter(Boolean)
-  ay = y - 31
-  for (const l of (detailLines.length > 0 ? detailLines : ['-']).slice(0, 3)) {
-    page.drawText(l, {
-      x: MARGIN + colW + 10,
-      y: ay,
-      size: 9,
-      font,
-      color: rgb(0.06, 0.09, 0.16),
-    })
-    ay -= 12
-  }
-  y -= detailH + 24
+  const detailColW = colW / 2
+  drawLabel(page, "BUYER'S ORDER NO.", MARGIN + colW + 10, y - 16, bold)
+  page.drawText(data.buyerOrderNo || '-', {
+    x: MARGIN + colW + 10,
+    y: y - 31,
+    size: 9,
+    font,
+    color: rgb(0.06, 0.09, 0.16),
+  })
+  drawLabel(page, 'ORDER DATE', MARGIN + colW + detailColW + 4, y - 16, bold)
+  page.drawText(data.buyerOrderDateLabel || '-', {
+    x: MARGIN + colW + detailColW + 4,
+    y: y - 31,
+    size: 9,
+    font,
+    color: rgb(0.06, 0.09, 0.16),
+  })
+  y -= detailH + 20
 
-  // Centered, bold, underlined, bigger title before table.
-  const title = `PROOF FOR ARTICLES Ref - ${data.invoiceNumber}`
-  const titleSize = 18
+  // Centered, bold, underlined heading before table.
+  const title = `PROOF OF ARTICLES Ref - ${data.invoiceNumber}`
+  const titleSize = 14
   const titleWidth = bold.widthOfTextAtSize(title, titleSize)
   const titleX = MARGIN + (CONTENT_W - titleWidth) / 2
   const titleY = y
   page.drawText(title, { x: titleX, y: titleY, size: titleSize, font: bold, color: rgb(0.06, 0.09, 0.16) })
   page.drawLine({
-    start: { x: titleX, y: titleY - 3 },
-    end: { x: titleX + titleWidth, y: titleY - 3 },
-    thickness: 1,
+    start: { x: titleX, y: titleY - 2 },
+    end: { x: titleX + titleWidth, y: titleY - 2 },
+    thickness: 0.9,
     color: rgb(0.06, 0.09, 0.16),
   })
-  y -= 28
+  y -= 22
 
   // Table: only Sr No and Description.
   const srW = 55

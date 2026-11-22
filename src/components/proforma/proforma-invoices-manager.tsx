@@ -1981,7 +1981,7 @@ function SummaryCard({
   hint: string
 }) {
   return (
-    <div className={`${cardClass} px-4 py-4`}>
+    <div className="rounded-2xl border border-brand-100 bg-brand-50/35 px-4 py-4 shadow-sm">
       <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</p>
       <p className="mt-1 text-2xl font-semibold tabular-nums text-slate-900">{value}</p>
       <p className="mt-1 text-xs text-slate-500">{hint}</p>
