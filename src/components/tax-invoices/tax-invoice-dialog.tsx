@@ -27,6 +27,7 @@ import {
   DEFAULT_TAX_RATE,
   getTaxInvoiceNumberPrefix,
   nextTaxInvoiceNumber,
+  parseLinkedProformaIds,
   proformaGrandTotal,
   proformaTaxAmount,
   roundMoney,
@@ -137,7 +138,11 @@ export function TaxInvoiceDialog({
         client_id: invoice.client_id ?? '',
         po_number: invoice.po_number ?? '',
         po_date: (invoice.po_date ?? '').slice(0, 10),
-        notes: invoice.notes ?? '',
+        notes:
+          invoice.document_content?.trim().startsWith('{') &&
+          !parseLinkedProformaIds(invoice.document_content).length
+            ? (invoice.document_content ?? '')
+            : (invoice.notes ?? ''),
         subtotal: String(subtotal),
         tax_rate: String(derivedRate),
         status_code: invoice.status_code ?? 'UNPAID',
@@ -397,6 +402,25 @@ export function TaxInvoiceDialog({
       return
     }
 
+    const rawDocumentContent = form.notes.trim()
+    let notesValue: string | null = null
+    let documentContentValue: string | null = null
+
+    if (rawDocumentContent.startsWith('{')) {
+      try {
+        const parsed = JSON.parse(rawDocumentContent) as unknown
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+          throw new Error('JSON content must be an object.')
+        }
+        documentContentValue = JSON.stringify(parsed)
+      } catch {
+        setError('Document content JSON is invalid. Use valid JSON, or plain text for the details box.')
+        return
+      }
+    } else {
+      notesValue = rawDocumentContent || null
+    }
+
     setSaving(true)
     setError(null)
 
@@ -407,7 +431,8 @@ export function TaxInvoiceDialog({
       invoice_date: form.tax_invoice_date,
       po_number: form.po_number.trim() || null,
       po_date: form.po_date || null,
-      notes: form.notes.trim() || null,
+      notes: notesValue,
+      document_content: documentContentValue,
       subtotal: roundMoney(subtotal),
       tax_total: roundMoney(taxTotal),
       grand_total: roundMoney(grandTotal),
@@ -426,11 +451,12 @@ export function TaxInvoiceDialog({
             throw updateError
           }
 
-          // The PO columns have not been migrated yet; save everything else.
+          // Newer columns may not be migrated yet; save everything else.
           const legacyPayload: Record<string, unknown> = { ...payload }
           delete legacyPayload.po_number
           delete legacyPayload.po_date
           delete legacyPayload.notes
+          delete legacyPayload.document_content
 
           const { error: legacyError } = await supabase
             .from('tax_invoices')
@@ -442,7 +468,7 @@ export function TaxInvoiceDialog({
           }
 
           await onSaved(
-            `Tax invoice ${number} was updated. Apply the latest Supabase migration to store the PO number and date.`
+            `Tax invoice ${number} was updated. Apply the latest Supabase migration to store PO/document content fields.`
           )
           onClose()
           return
@@ -478,12 +504,12 @@ export function TaxInvoiceDialog({
         .single()
 
       if (insertError && isMissingColumnError(insertError)) {
-        // The PO columns have not been migrated yet; create the invoice without
-        // them so the conversion still completes.
+        // Newer columns may not be migrated yet; create the invoice without them.
         const legacyPayload: Record<string, unknown> = { ...payload, amount_paid: 0 }
         delete legacyPayload.po_number
         delete legacyPayload.po_date
         delete legacyPayload.notes
+        delete legacyPayload.document_content
 
         const retry = await supabase
           .from('tax_invoices')
@@ -820,20 +846,21 @@ export function TaxInvoiceDialog({
 
         <div>
           <label htmlFor="tax-notes" className={labelClass}>
-            Notes / remark
+            Document content (JSON)
           </label>
           <textarea
             id="tax-notes"
             value={form.notes}
             onChange={(event) => updateForm('notes', event.target.value)}
-            rows={3}
-            maxLength={500}
-            placeholder="e.g. Purchase Articles Of Sep-26 (As Per Estimate : PI-202609-0001)"
-            className={`${inputClass} resize-y`}
+            rows={5}
+            maxLength={4000}
+            placeholder={'{\n  "kind_attention": "Dr. Name / Department",\n  "notes": "Purchase of articles / service details"\n}'}
+            className={`${inputClass} resize-y font-mono text-xs`}
           />
           <p className="mt-1 text-xs text-slate-500">
-            Printed in the Purchase Articles block of the Word tax invoice. Leave blank to use the
-            generated month and estimate numbers.
+            JSON is stored in <code>document_content</code> and used when generating the Word tax
+            invoice. Use <code>kind_attention</code> for the Kind Attn box and <code>notes</code> for
+            the blank details box. Plain text is still accepted as the details box.
           </p>
         </div>
 

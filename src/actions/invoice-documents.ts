@@ -197,6 +197,33 @@ function firstValue(
   return null
 }
 
+function resolveInvoiceDocumentContent(invoice: {
+  document_content?: string | null
+  notes?: string | null
+}): {
+  documentContent: string | null
+  notes: string | null
+} {
+  const raw = invoice.document_content?.trim() ?? ''
+
+  if (!raw.startsWith('{')) {
+    return { documentContent: invoice.document_content ?? null, notes: invoice.notes ?? null }
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>
+
+    // Keep legacy proforma-link payloads working; they are not document overrides.
+    if (Array.isArray(parsed.proforma_invoice_ids) || parsed.source === 'PROFORMA') {
+      return { documentContent: null, notes: invoice.notes ?? null }
+    }
+
+    return { documentContent: raw, notes: null }
+  } catch {
+    return { documentContent: invoice.document_content ?? null, notes: invoice.notes ?? null }
+  }
+}
+
 /** Render a proforma invoice as a Word document. */
 export async function downloadProformaDocument(
   invoiceId: string
@@ -246,6 +273,7 @@ export async function downloadProformaDocument(
     const storedTax = Number(invoice.tax_amount ?? 0) || Number(invoice.tax_total ?? 0)
     const taxAmount =
       storedTax || Math.max(0, Number(invoice.grand_total ?? 0) - subtotal)
+    const { documentContent, notes } = resolveInvoiceDocumentContent(invoice)
 
     const data = buildInvoiceDocumentData({
       kind: 'PROFORMA',
@@ -260,7 +288,8 @@ export async function downloadProformaDocument(
       taxAmount,
       taxRate: Number(invoice.tax_rate ?? 0),
       grandTotal: Number(invoice.grand_total ?? 0),
-      documentContent: invoice.document_content,
+      documentContent,
+      notes,
     })
 
     const buffer = await renderInvoiceDocx(data)
@@ -362,6 +391,8 @@ export async function downloadTaxInvoiceDocument(
       fetchContactName(firstValue(articles, 'contact_id')),
     ])
 
+    const { documentContent, notes } = resolveInvoiceDocumentContent(invoice)
+
     const data = buildInvoiceDocumentData({
       kind: 'TAX',
       invoiceNumber:
@@ -384,11 +415,11 @@ export async function downloadTaxInvoiceDocument(
           ? (Number(invoice.tax_total ?? 0) / Number(invoice.subtotal ?? 1)) * 100
           : 0,
       grandTotal: Number(invoice.grand_total ?? 0),
-      documentContent: invoice.document_content,
+      documentContent,
       linkedProformaNumbers: proformas.map((proforma) => proforma.pi_number),
       buyerOrderNo: invoice.po_number,
       buyerOrderDate: invoice.po_date,
-      notes: invoice.notes,
+      notes,
     })
 
     const buffer = await renderInvoiceDocx(data)

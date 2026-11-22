@@ -260,9 +260,14 @@ type DocumentOverrides = {
   buyer_order_no?: string
   buyer_order_date?: string
   mode_of_payment?: string
-  kind_attention?: string[]
-  purchase_of?: string
+  /** Text shown in the "Kind Attn" box. String or array of lines. */
+  kind_attention?: string[] | string
+  /** Text shown in the second detail box (replaces generated "Purchase Articles Of..."). */
+  notes?: string
   purchase_articles_of?: string
+  /** Alias for notes; kept for backward compatibility. */
+  purchase_articles_line?: string
+  purchase_of?: string
   delivery_date?: string
   service_code?: string
   service_description?: string
@@ -500,6 +505,8 @@ function parseOverrides(documentContent: string | null | undefined): DocumentOve
     overrides.mode_of_payment = stringValue('mode_of_payment')
     overrides.purchase_of = stringValue('purchase_of')
     overrides.purchase_articles_of = stringValue('purchase_articles_of')
+    overrides.notes = stringValue('notes')
+    overrides.purchase_articles_line = stringValue('purchase_articles_line')
     overrides.delivery_date = stringValue('delivery_date')
     overrides.service_code = stringValue('service_code')
     overrides.service_description = stringValue('service_description')
@@ -512,7 +519,7 @@ function parseOverrides(documentContent: string | null | undefined): DocumentOve
         (value): value is string => typeof value === 'string' && value.trim() !== ''
       )
     } else if (typeof attention === 'string' && attention.trim()) {
-      overrides.kind_attention = [attention.trim()]
+      overrides.kind_attention = attention.trim()
     }
 
     return overrides
@@ -621,7 +628,7 @@ export function buildInvoiceDocumentData(
     overrides.purchase_articles_of ??
     formatMonthYear(requestDates[0] ?? invoiceDate)
 
-  const notes = input.notes?.trim() ?? ''
+  const notesField = input.notes?.trim() ?? ''
 
   const estimateNumbers = (input.linkedProformaNumbers ?? [])
     .map((value) => value?.trim() ?? '')
@@ -631,21 +638,35 @@ export function buildInvoiceDocumentData(
     ? purchaseArticlesOf
     : `Purchase Articles Of ${purchaseArticlesOf}`
 
-  // The tax invoice template prints its own Notes / Remark text in this block
-  // when one was captured; otherwise keep the generated "Purchase Articles Of".
+  // `document_content` JSON is the most specific override, then the invoice
+  // notes field, then the generated "Purchase Articles Of ..." text.
   const purchaseArticlesLine =
-    kind === 'TAX' && notes
-      ? notes
+    overrides.notes ??
+    overrides.purchase_articles_line ??
+    (notesField
+      ? notesField
       : `${purchaseArticlesLabel}${
           kind === 'TAX' && estimateNumbers.length > 0
             ? ` (As Per Estimate : ${estimateNumbers.join(', ')})`
             : ''
-        }`
+        }`)
 
-  // "Kind Attn" is the contact person named on the request / invoice.
+  // "Kind Attn" can be driven by document_content JSON; otherwise default to
+  // the request/contact name.
+  const overrideAttention =
+    typeof overrides.kind_attention === 'string'
+      ? overrides.kind_attention
+          .split(/\r?\n|\s*[;|]\s*/)
+          .map((value) => value.trim())
+          .filter(Boolean)
+      : overrides.kind_attention
+
   const kindAttention =
-    overrides.kind_attention ??
-    (input.contactName?.trim() ? [input.contactName.trim()] : [])
+    overrideAttention && overrideAttention.length > 0
+      ? overrideAttention
+      : input.contactName?.trim()
+        ? [input.contactName.trim()]
+        : []
 
   const cgstAmount = roundMoney(taxTotal / 2)
   const sgstAmount = roundMoney(taxTotal - cgstAmount)
@@ -673,7 +694,7 @@ export function buildInvoiceDocumentData(
     purchaseOf: overrides.purchase_of ?? PURCHASE_OF_ARTICLES,
     purchaseArticlesOf,
     purchaseArticlesLine,
-    notes,
+    notes: notesField,
     deliveryDateLabel: overrides.delivery_date
       ? formatDocumentDate(overrides.delivery_date)
       : formatDeliveryDate(invoiceDate),

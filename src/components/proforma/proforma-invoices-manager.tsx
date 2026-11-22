@@ -76,6 +76,8 @@ type ProformaInvoiceRow = {
   grand_total: number | null
   invoice_date: string | null
   tax_invoice_id?: string | null
+  document_content?: string | null
+  notes?: string | null
   created_at: string | null
 }
 
@@ -88,6 +90,7 @@ type EditForm = {
   status_code: string
   subtotal: string
   tax_rate: string
+  document_content: string
 }
 
 const STATUS_TONES: Record<string, string> = {
@@ -105,6 +108,7 @@ const EMPTY_EDIT_FORM: EditForm = {
   status_code: '',
   subtotal: '0',
   tax_rate: '18',
+  document_content: '',
 }
 
 export function ProformaInvoicesManager() {
@@ -635,6 +639,8 @@ export function ProformaInvoicesManager() {
   }
 
   function openEditDialog(row: ProformaInvoiceRow) {
+    const raw = row.document_content?.trim() ?? ''
+    const legacyLinked = raw.startsWith('{') && raw.includes('proforma_invoice_ids')
     setEditForm({
       pi_number: row.pi_number ?? '',
       pi_date: (row.pi_date ?? row.invoice_date ?? today()).slice(0, 10),
@@ -642,6 +648,7 @@ export function ProformaInvoicesManager() {
       status_code: row.status_code ?? '',
       subtotal: String(toNumber(row.subtotal)),
       tax_rate: String(toNumber(row.tax_rate ?? 18)),
+      document_content: raw.startsWith('{') && !legacyLinked ? raw : (row.notes ?? ''),
     })
     setEditError(null)
     setEditTarget(row)
@@ -700,6 +707,24 @@ export function ProformaInvoicesManager() {
       return
     }
 
+    const rawDocumentContent = editForm.document_content.trim()
+    let notesValue: string | null = null
+    let documentContentValue: string | null = null
+    if (rawDocumentContent.startsWith('{')) {
+      try {
+        const parsed = JSON.parse(rawDocumentContent) as unknown
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+          throw new Error('JSON content must be an object.')
+        }
+        documentContentValue = JSON.stringify(parsed)
+      } catch {
+        setEditError('Document content JSON is invalid. Use valid JSON, or plain text for the details box.')
+        return
+      }
+    } else {
+      notesValue = rawDocumentContent || null
+    }
+
     setSaving(true)
     setEditError(null)
 
@@ -714,6 +739,8 @@ export function ProformaInvoicesManager() {
       tax_rate: safeEditTaxRate,
       tax_amount: editTaxAmount,
       grand_total: editGrandTotal,
+      notes: notesValue,
+      document_content: documentContentValue,
     }
 
     try {
@@ -1793,6 +1820,26 @@ export function ProformaInvoicesManager() {
               {formatCurrency(editGrandTotal)}
             </dd>
           </dl>
+
+          <div>
+            <label htmlFor="edit-pi-document-content" className={labelClass}>
+              Document content (JSON)
+            </label>
+            <textarea
+              id="edit-pi-document-content"
+              value={editForm.document_content}
+              onChange={(event) => updateEditForm('document_content', event.target.value)}
+              rows={5}
+              maxLength={4000}
+              placeholder={'{\n  "kind_attention": "Dr. Name / Department",\n  "notes": "Purchase of articles / service details"\n}'}
+              className={`${inputClass} resize-y font-mono text-xs`}
+            />
+            <p className="mt-1 text-xs text-slate-500">
+              JSON is stored in <code>document_content</code> and used when generating the Word
+              proforma invoice. Use <code>kind_attention</code> for Kind Attn and <code>notes</code> for
+              the blank details box. Plain text is still accepted as the details box.
+            </p>
+          </div>
 
           <div className="flex flex-wrap justify-end gap-2 border-t border-slate-200 pt-4">
             <button

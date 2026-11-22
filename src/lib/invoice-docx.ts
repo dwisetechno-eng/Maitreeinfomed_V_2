@@ -14,8 +14,10 @@ import {
   BorderStyle,
   Document,
   Footer,
+  Header,
   ImageRun,
   Packer,
+  PageNumber,
   Paragraph,
   Table,
   TableCell,
@@ -352,7 +354,15 @@ function buildPartyCards(data: InvoiceDocumentData): Table {
 }
 
 function buildOrderDetails(data: InvoiceDocumentData): Table {
-  const attention = data.kindAttention.join(' · ') || '—'
+  const attention = data.kindAttention.length > 0 ? data.kindAttention : ['—']
+  const detailLines = data.purchaseArticlesLine
+    .split(/\r?\n/)
+    .map((value) => value.trim())
+    .filter(Boolean)
+
+  if (detailLines.length === 0) {
+    detailLines.push('—')
+  }
 
   return new Table({
     width: { size: CONTENT_WIDTH, type: WidthType.DXA },
@@ -391,22 +401,23 @@ function buildOrderDetails(data: InvoiceDocumentData): Table {
           cell(
             [
               label('Kind Attn'),
-              line(attention, { size: 17 }),
+              ...attention.map((value) => line(value, { size: 17 })),
             ],
             { width: 3600 }
           ),
           cell(
             [
-              label(
-                data.kind === 'TAX' && data.notes ? 'Notes / Remark' : 'Purchase Articles Of'
-              ),
-              line(data.purchaseArticlesLine, { size: 17 }),
+              // Intentionally blank title: this box is driven by notes/JSON.
+              label(' '),
+              ...detailLines.map((value) => line(value, { size: 17 })),
               ...(data.kind === 'TAX'
-                ? [line(`Delivery Date - ${data.deliveryDateLabel}`, {
-                    size: 15,
-                    color: MUTED,
-                    before: 30,
-                  })]
+                ? [
+                    line(`Delivery Date - ${data.deliveryDateLabel}`, {
+                      size: 15,
+                      color: MUTED,
+                      before: 30,
+                    }),
+                  ]
                 : []),
             ],
             { width: CONTENT_WIDTH - 3600, columnSpan: 2 }
@@ -787,7 +798,6 @@ function formatQuantity(value: number): string {
 export async function renderInvoiceDocx(data: InvoiceDocumentData): Promise<Buffer> {
   const theme = invoiceTheme(data.kind)
   const children: Array<Paragraph | Table> = [
-    buildLetterhead(data),
     new Paragraph({
       spacing: { before: 40, after: 160 },
       border: {
@@ -833,17 +843,24 @@ export async function renderInvoiceDocx(data: InvoiceDocumentData): Promise<Buff
         properties: {
           page: {
             size: { width: 11906, height: 16838 },
-            margin: { top: 567, right: 720, bottom: 567, left: 720 },
+            // Extra top margin + small header distance keeps the repeated letterhead
+            // from overlapping the body on every page.
+            margin: { top: 3200, right: 720, bottom: 567, left: 720, header: 360 },
           },
+        },
+        headers: {
+          default: new Header({
+            children: [buildLetterhead(data)],
+          }),
         },
         footers: {
           default: new Footer({
             children: [
               new Paragraph({
-                alignment: AlignmentType.CENTER,
+                alignment: AlignmentType.RIGHT,
                 children: [
                   new TextRun({
-                    text: 'This is a computer generated invoice. No signature is required.',
+                    children: ['Page ', PageNumber.CURRENT, ' of ', PageNumber.TOTAL_PAGES],
                     font: FONT,
                     size: 12,
                     color: '94A3B8',
