@@ -657,8 +657,9 @@ export function buildInvoiceDocumentData(
     (notesField ? notesField : generatedArticlesLine)
 
   // "Kind Attn" can be driven by document_content JSON; otherwise default to
-  // the request/contact name.
-  const overrideAttention =
+  // the request/contact name. `{default}` is replaced with the DB contact name.
+  const defaultAttention = input.contactName?.trim() ?? ''
+  const overrideAttentionRaw =
     typeof overrides.kind_attention === 'string'
       ? overrides.kind_attention
           .split(/\r?\n|\s*[;|]\s*/)
@@ -666,11 +667,15 @@ export function buildInvoiceDocumentData(
           .filter(Boolean)
       : overrides.kind_attention
 
+  const overrideAttention = overrideAttentionRaw
+    ?.map((value) => value.replace(/\{\s*default\s*\}/gi, defaultAttention).trim())
+    .filter(Boolean)
+
   const kindAttention =
     overrideAttention && overrideAttention.length > 0
       ? overrideAttention
-      : input.contactName?.trim()
-        ? [input.contactName.trim()]
+      : defaultAttention
+        ? [defaultAttention]
         : []
 
   const cgstAmount = roundMoney(taxTotal / 2)
