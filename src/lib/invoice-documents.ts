@@ -515,9 +515,12 @@ function parseOverrides(documentContent: string | null | undefined): DocumentOve
     const attention = parsed.kind_attention
 
     if (Array.isArray(attention)) {
-      overrides.kind_attention = attention.filter(
+      const values = attention.filter(
         (value): value is string => typeof value === 'string' && value.trim() !== ''
       )
+      if (values.length > 0) {
+        overrides.kind_attention = values
+      }
     } else if (typeof attention === 'string' && attention.trim()) {
       overrides.kind_attention = attention.trim()
     }
