@@ -638,18 +638,20 @@ export function buildInvoiceDocumentData(
     ? purchaseArticlesOf
     : `Purchase Articles Of ${purchaseArticlesOf}`
 
+  const generatedArticlesLine = `${purchaseArticlesLabel}${
+    estimateNumbers.length > 0
+      ? ` (As Per Estimate : ${estimateNumbers.join(', ')})`
+      : kind === 'PROFORMA'
+        ? ` (As Per Estimate : ${input.invoiceNumber.trim()})`
+        : ''
+  }`
+
   // `document_content` JSON is the most specific override, then the invoice
   // notes field, then the generated "Purchase Articles Of ..." text.
   const purchaseArticlesLine =
     overrides.notes ??
     overrides.purchase_articles_line ??
-    (notesField
-      ? notesField
-      : `${purchaseArticlesLabel}${
-          kind === 'TAX' && estimateNumbers.length > 0
-            ? ` (As Per Estimate : ${estimateNumbers.join(', ')})`
-            : ''
-        }`)
+    (notesField ? notesField : generatedArticlesLine)
 
   // "Kind Attn" can be driven by document_content JSON; otherwise default to
   // the request/contact name.

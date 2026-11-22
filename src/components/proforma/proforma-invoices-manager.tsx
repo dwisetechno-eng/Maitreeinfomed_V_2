@@ -1823,21 +1823,22 @@ export function ProformaInvoicesManager() {
 
           <div>
             <label htmlFor="edit-pi-document-content" className={labelClass}>
-              Document content (JSON)
+              Notes / Remarks
             </label>
             <textarea
               id="edit-pi-document-content"
               value={editForm.document_content}
               onChange={(event) => updateEditForm('document_content', event.target.value)}
-              rows={5}
+              rows={6}
               maxLength={4000}
-              placeholder={'{\n  "kind_attention": "Dr. Name / Department",\n  "notes": "Purchase of articles / service details"\n}'}
+              placeholder={'{\n  "kind_attention": "Dr. A",\n  "notes": "Purchase Articles Of ...",\n  "buyer_order_no": "6600088911"\n}'}
               className={`${inputClass} resize-y font-mono text-xs`}
             />
             <p className="mt-1 text-xs text-slate-500">
-              JSON is stored in <code>document_content</code> and used when generating the Word
-              proforma invoice. Use <code>kind_attention</code> for Kind Attn and <code>notes</code> for
-              the blank details box. Plain text is still accepted as the details box.
+              Stored as document content. JSON fields: <code>kind_attention</code>, <code>notes</code>,
+              <code>buyer_order_no</code>, <code>buyer_order_date</code>, <code>mode_of_payment</code>,
+              <code>delivery_date</code>, <code>service_code</code>, <code>service_description</code>, <code>sac_code</code>.
+              Plain text is also accepted for the details box.
             </p>
           </div>
 

@@ -798,13 +798,6 @@ function formatQuantity(value: number): string {
 export async function renderInvoiceDocx(data: InvoiceDocumentData): Promise<Buffer> {
   const theme = invoiceTheme(data.kind)
   const children: Array<Paragraph | Table> = [
-    new Paragraph({
-      spacing: { before: 40, after: 160 },
-      border: {
-        bottom: { style: BorderStyle.SINGLE, size: 18, color: theme.accent, space: 1 },
-      },
-      children: [],
-    }),
     buildPartyCards(data),
     new Paragraph({ spacing: { after: 80 } }),
     buildOrderDetails(data),
@@ -850,7 +843,16 @@ export async function renderInvoiceDocx(data: InvoiceDocumentData): Promise<Buff
         },
         headers: {
           default: new Header({
-            children: [buildLetterhead(data)],
+            children: [
+              buildLetterhead(data),
+              new Paragraph({
+                spacing: { before: 40, after: 0 },
+                border: {
+                  bottom: { style: BorderStyle.SINGLE, size: 18, color: theme.accent, space: 1 },
+                },
+                children: [],
+              }),
+            ],
           }),
         },
         footers: {

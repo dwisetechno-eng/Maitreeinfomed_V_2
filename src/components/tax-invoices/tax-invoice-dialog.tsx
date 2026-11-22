@@ -132,17 +132,26 @@ export function TaxInvoiceDialog({
           ? roundMoney((taxTotal / subtotal) * 100)
           : DEFAULT_TAX_RATE
 
+      const rawDoc = invoice.document_content?.trim() ?? ''
+      const hasDocContent = rawDoc.startsWith('{') && !parseLinkedProformaIds(invoice.document_content).length
+      const defaultContent = JSON.stringify({
+        kind_attention: '',
+        notes: `Purchase Articles Of ${new Date(invoice.invoice_date ?? todayIsoDate()).toLocaleString('en-US', { month: 'short', timeZone: 'UTC' })}-${String(new Date(invoice.invoice_date ?? todayIsoDate()).getUTCFullYear()).slice(-2)} (As Per Estimate : )`,
+        buyer_order_no: invoice.po_number ?? '6600088911',
+        buyer_order_date: invoice.po_date ?? '2026-10-14',
+        mode_of_payment: '30 Days',
+        delivery_date: invoice.invoice_date ?? todayIsoDate(),
+        service_code: '9200431',
+        service_description: 'Medical Content Development & Publishing',
+        sac_code: '998393',
+      }, null, 2)
       setForm({
         tax_invoice_number: invoice.tax_invoice_number ?? '',
         tax_invoice_date: (invoice.invoice_date ?? todayIsoDate()).slice(0, 10),
         client_id: invoice.client_id ?? '',
         po_number: invoice.po_number ?? '',
         po_date: (invoice.po_date ?? '').slice(0, 10),
-        notes:
-          invoice.document_content?.trim().startsWith('{') &&
-          !parseLinkedProformaIds(invoice.document_content).length
-            ? (invoice.document_content ?? '')
-            : (invoice.notes ?? ''),
+        notes: hasDocContent ? rawDoc : (invoice.notes ?? defaultContent),
         subtotal: String(subtotal),
         tax_rate: String(derivedRate),
         status_code: invoice.status_code ?? 'UNPAID',
@@ -152,6 +161,17 @@ export function TaxInvoiceDialog({
     }
 
     const date = todayIsoDate()
+    const defaultNotes = JSON.stringify({
+      kind_attention: '',
+      notes: `Purchase Articles Of ${new Date(date).toLocaleString('en-US', { month: 'short', timeZone: 'UTC' })}-${String(new Date(date).getUTCFullYear()).slice(-2)} (As Per Estimate : )`,
+      buyer_order_no: '6600088911',
+      buyer_order_date: '2026-10-14',
+      mode_of_payment: '30 Days',
+      delivery_date: date,
+      service_code: '9200431',
+      service_description: 'Medical Content Development & Publishing',
+      sac_code: '998393',
+    }, null, 2)
 
     setForm({
       ...EMPTY_FORM,
@@ -160,6 +180,7 @@ export function TaxInvoiceDialog({
       client_id: clients[0]?.id ?? '',
       status_code:
         statuses.find((status) => status.status_code === 'UNPAID')?.status_code ?? 'UNPAID',
+      notes: defaultNotes,
     })
     setNumberTouched(false)
   }, [clients, existingNumbers, invoice, open, statuses])
@@ -846,21 +867,22 @@ export function TaxInvoiceDialog({
 
         <div>
           <label htmlFor="tax-notes" className={labelClass}>
-            Document content (JSON)
+            Notes / Remarks
           </label>
           <textarea
             id="tax-notes"
             value={form.notes}
             onChange={(event) => updateForm('notes', event.target.value)}
-            rows={5}
+            rows={6}
             maxLength={4000}
-            placeholder={'{\n  "kind_attention": "Dr. Name / Department",\n  "notes": "Purchase of articles / service details"\n}'}
+            placeholder={'{\n  "kind_attention": "Dr. A",\n  "notes": "Purchase Articles Of ...",\n  "buyer_order_no": "6600088911"\n}'}
             className={`${inputClass} resize-y font-mono text-xs`}
           />
           <p className="mt-1 text-xs text-slate-500">
-            JSON is stored in <code>document_content</code> and used when generating the Word tax
-            invoice. Use <code>kind_attention</code> for the Kind Attn box and <code>notes</code> for
-            the blank details box. Plain text is still accepted as the details box.
+            Stored as document content. JSON fields: <code>kind_attention</code>, <code>notes</code>,
+            <code>buyer_order_no</code>, <code>buyer_order_date</code>, <code>mode_of_payment</code>,
+            <code>delivery_date</code>, <code>service_code</code>, <code>service_description</code>, <code>sac_code</code>.
+            Plain text is also accepted for the details box.
           </p>
         </div>
 

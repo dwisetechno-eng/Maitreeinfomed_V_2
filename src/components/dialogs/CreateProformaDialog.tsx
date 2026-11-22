@@ -531,6 +531,27 @@ export function CreateProformaDialog({ open, onClose, onCreated }: CreateProform
     let invoiceId: string | null = null
 
     try {
+      const selectedContact = contacts.find((contact) => contact.id === selectedContactId) ?? null
+      const requestDates = effectiveRows
+        .map((row) => row.request_date ?? row.created_at)
+        .filter((value): value is string => Boolean(value))
+        .sort()
+      const month = requestDates[0] ?? piDate
+      const monthLabel = new Date(month).toLocaleString('en-US', { month: 'short', timeZone: 'UTC' })
+      const yearLabel = String(new Date(month).getUTCFullYear()).slice(-2)
+      const purchaseMonth = `${monthLabel}-${yearLabel}`
+      const defaultDocumentContent = JSON.stringify({
+        kind_attention: selectedContact?.contact_name?.trim() || '',
+        notes: `Purchase Articles Of ${purchaseMonth} (As Per Estimate : ${piNumber.trim()})`,
+        buyer_order_no: '6600088911',
+        buyer_order_date: '2026-10-14',
+        mode_of_payment: '30 Days',
+        delivery_date: piDate,
+        service_code: '9200431',
+        service_description: 'Medical Content Development & Publishing',
+        sac_code: '998393',
+      }, null, 2)
+
       const created = await createProformaInvoice(supabase, {
         clientId: selectedClientId,
         departmentId: selectedDepartmentId || null,
@@ -543,6 +564,7 @@ export function CreateProformaDialog({ open, onClose, onCreated }: CreateProform
         piNumber: piNumber.trim(),
         piDate,
         invoiceDate: piDate,
+        notes: defaultDocumentContent,
       })
 
       if (!created.ok) {
