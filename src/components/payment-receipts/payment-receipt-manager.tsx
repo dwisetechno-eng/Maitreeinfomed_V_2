@@ -1,9 +1,14 @@
 'use client'
 
-import type { FormEvent } from 'react'
+import { Fragment, type FormEvent } from 'react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
+  ChevronDown,
+  ChevronRight,
+  ChevronsDownUp,
+  ChevronsUpDown,
   Coins,
+  Layers,
   Pencil,
   Plus,
   RefreshCw,
@@ -37,6 +42,7 @@ import { IconButton } from '@/components/ui/icon-button'
 import { Modal } from '@/components/ui/modal'
 import { SpinnerIcon } from '@/components/ui/icons'
 import { isMissingTableError } from '@/lib/supabase-errors'
+import { groupReceiptsByMonth } from '@/lib/receipt-grouping'
 import { recalculateTaxInvoicePayment } from '@/lib/invoice-links'
 import { createClient } from '@/utils/supabase/client'
 
@@ -102,6 +108,8 @@ export function PaymentReceiptManager() {
   const [query, setQuery] = useState('')
   const [clientFilter, setClientFilter] = useState('')
   const [modeFilter, setModeFilter] = useState('')
+  const [groupByMonth, setGroupByMonth] = useState(true)
+  const [collapsedMonths, setCollapsedMonths] = useState<Set<string>>(new Set())
 
   const [dialog, setDialog] = useState<DialogState | null>(null)
   const [form, setForm] = useState<FormState>(EMPTY_FORM)
@@ -224,6 +232,37 @@ export function PaymentReceiptManager() {
         .includes(term)
     })
   }, [clientFilter, clientNames, modeFilter, query, receipts])
+
+  const receiptGroups = useMemo(
+    () => groupReceiptsByMonth(filteredReceipts),
+    [filteredReceipts]
+  )
+
+  const allMonthsCollapsed =
+    receiptGroups.length > 0 && receiptGroups.every((group) => collapsedMonths.has(group.key))
+
+  function toggleMonth(key: string) {
+    setCollapsedMonths((current) => {
+      const next = new Set(current)
+
+      if (next.has(key)) {
+        next.delete(key)
+      } else {
+        next.add(key)
+      }
+
+      return next
+    })
+  }
+
+  function toggleAllMonths() {
+    setCollapsedMonths((current) => {
+      const allCollapsed =
+        receiptGroups.length > 0 && receiptGroups.every((group) => current.has(group.key))
+
+      return allCollapsed ? new Set() : new Set(receiptGroups.map((group) => group.key))
+    })
+  }
 
   const summary = useMemo(() => {
     const totalCollected = roundMoney(
@@ -467,6 +506,96 @@ export function PaymentReceiptManager() {
       }
     : null
 
+  function renderReceiptRow(receipt: ReceiptRow) {
+    const status = receiptStatus(receipt, appliedByReceipt.get(receipt.id) ?? 0)
+    const amount = toNumber(receipt.amount_received)
+    const applied = appliedByReceipt.get(receipt.id) ?? 0
+    const remaining = roundMoney(Math.max(0, amount - applied))
+
+    return (
+      <tr key={receipt.id} className="transition-colors hover:bg-slate-50/70">
+        <td className="whitespace-nowrap px-4 py-3">
+          <span className="flex items-center gap-2 font-medium text-slate-900">
+            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-50 text-brand-700">
+              <Wallet className="h-4 w-4" />
+            </span>
+            {receipt.receipt_number}
+          </span>
+        </td>
+        <td className="whitespace-nowrap px-4 py-3 text-slate-600">
+          {formatDate(receipt.receipt_date ?? receipt.created_at)}
+        </td>
+        <td className="px-4 py-3 text-slate-600">
+          {receipt.client_id ? clientNames.get(receipt.client_id) ?? 'Unknown client' : '—'}
+        </td>
+        <td className="whitespace-nowrap px-4 py-3 text-right">
+          <p className="font-medium tabular-nums text-slate-900">{formatCurrency(amount)}</p>
+          {applied > 0 && (
+            <p className="text-xs tabular-nums text-slate-500">
+              {formatCurrency(applied)} applied
+            </p>
+          )}
+        </td>
+        <td className="whitespace-nowrap px-4 py-3">
+          <span className="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">
+            {modeLabel(receipt.payment_mode)}
+          </span>
+        </td>
+        <td className="px-4 py-3 text-slate-600">
+          {receipt.reference_no ? (
+            <span className="break-all">{receipt.reference_no}</span>
+          ) : (
+            <span className="text-slate-400">—</span>
+          )}
+        </td>
+        <td className="px-4 py-3">
+          <span className={`${badgeClass} ${status.tone}`}>{status.label}</span>
+        </td>
+        <td className="px-4 py-3">
+          <div className="flex items-center justify-end gap-1">
+            <IconButton
+              label={`Allocations for ${receipt.receipt_number}`}
+              tooltipText={
+                !receipt.client_id
+                  ? 'This receipt has no client'
+                  : remaining <= EPSILON
+                    ? 'Fully applied – open to review or remove allocations'
+                    : 'Apply to tax invoices or change allocations'
+              }
+              tooltip="native"
+              variant="ghost"
+              size="sm"
+              icon={<Coins />}
+              disabled={!receipt.client_id}
+              onClick={() => setAllocateTarget(receipt)}
+            />
+            <IconButton
+              label={`Edit ${receipt.receipt_number}`}
+              tooltipText="Edit receipt"
+              tooltip="native"
+              variant="ghost"
+              size="sm"
+              icon={<Pencil />}
+              onClick={() => openEditDialog(receipt)}
+            />
+            <IconButton
+              label={`Delete ${receipt.receipt_number}`}
+              tooltipText="Delete receipt"
+              tooltip="native"
+              variant="danger"
+              size="sm"
+              icon={<Trash2 />}
+              onClick={() => {
+                setDeleteError(null)
+                setDeleteTarget(receipt)
+              }}
+            />
+          </div>
+        </td>
+      </tr>
+    )
+  }
+
   return (
     <div className="space-y-5">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
@@ -588,6 +717,37 @@ export function PaymentReceiptManager() {
 
             <button
               type="button"
+              onClick={() => setGroupByMonth((value) => !value)}
+              aria-pressed={groupByMonth}
+              aria-label={groupByMonth ? 'Show a flat list' : 'Group by month'}
+              title={groupByMonth ? 'Show a flat list' : 'Group by month'}
+              className={`${secondaryButtonClass} px-2.5 py-2`}
+            >
+              <Layers className="h-4 w-4" />
+              <span className="hidden xl:inline">{groupByMonth ? 'Grouped' : 'Flat'}</span>
+            </button>
+
+            {groupByMonth && (
+              <button
+                type="button"
+                onClick={toggleAllMonths}
+                aria-label={allMonthsCollapsed ? 'Expand all months' : 'Collapse all months'}
+                title={allMonthsCollapsed ? 'Expand all months' : 'Collapse all months'}
+                className={`${secondaryButtonClass} px-2.5 py-2`}
+              >
+                {allMonthsCollapsed ? (
+                  <ChevronsUpDown className="h-4 w-4" />
+                ) : (
+                  <ChevronsDownUp className="h-4 w-4" />
+                )}
+                <span className="hidden xl:inline">
+                  {allMonthsCollapsed ? 'Expand all' : 'Collapse all'}
+                </span>
+              </button>
+            )}
+
+            <button
+              type="button"
               onClick={() => void loadData()}
               disabled={loading}
               className={`${secondaryButtonClass} px-2.5 py-2`}
@@ -666,102 +826,43 @@ export function PaymentReceiptManager() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {filteredReceipts.map((receipt) => {
-                  const status = receiptStatus(
-                    receipt,
-                    appliedByReceipt.get(receipt.id) ?? 0
-                  )
-                  const amount = toNumber(receipt.amount_received)
-                  const applied = appliedByReceipt.get(receipt.id) ?? 0
-                  const remaining = roundMoney(Math.max(0, amount - applied))
+                {groupByMonth
+                  ? receiptGroups.map((group) => {
+                      const collapsed = collapsedMonths.has(group.key)
 
-                  return (
-                    <tr key={receipt.id} className="transition-colors hover:bg-slate-50/70">
-                      <td className="whitespace-nowrap px-4 py-3">
-                        <span className="flex items-center gap-2 font-medium text-slate-900">
-                          <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-50 text-brand-700">
-                            <Wallet className="h-4 w-4" />
-                          </span>
-                          {receipt.receipt_number}
-                        </span>
-                      </td>
-                      <td className="whitespace-nowrap px-4 py-3 text-slate-600">
-                        {formatDate(receipt.receipt_date ?? receipt.created_at)}
-                      </td>
-                      <td className="px-4 py-3 text-slate-600">
-                        {receipt.client_id
-                          ? clientNames.get(receipt.client_id) ?? 'Unknown client'
-                          : '—'}
-                      </td>
-                      <td className="whitespace-nowrap px-4 py-3 text-right">
-                        <p className="font-medium tabular-nums text-slate-900">
-                          {formatCurrency(amount)}
-                        </p>
-                        {applied > 0 && (
-                          <p className="text-xs tabular-nums text-slate-500">
-                            {formatCurrency(applied)} applied
-                          </p>
-                        )}
-                      </td>
-                      <td className="whitespace-nowrap px-4 py-3">
-                        <span className="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">
-                          {modeLabel(receipt.payment_mode)}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-slate-600">
-                        {receipt.reference_no ? (
-                          <span className="break-all">{receipt.reference_no}</span>
-                        ) : (
-                          <span className="text-slate-400">—</span>
-                        )}
-                      </td>
-                      <td className="px-4 py-3">
-                        <span className={`${badgeClass} ${status.tone}`}>{status.label}</span>
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center justify-end gap-1">
-                          <IconButton
-                            label={`Allocations for ${receipt.receipt_number}`}
-                            tooltipText={
-                              !receipt.client_id
-                                ? 'This receipt has no client'
-                                : remaining <= EPSILON
-                                  ? 'Fully applied – open to review or remove allocations'
-                                  : 'Apply to tax invoices or change allocations'
-                            }
-                            tooltip="native"
-                            variant="ghost"
-                            size="sm"
-                            icon={<Coins />}
-                            disabled={!receipt.client_id}
-                            onClick={() => setAllocateTarget(receipt)}
-                          />
-                          <IconButton
-                            label={`Edit ${receipt.receipt_number}`}
-                            tooltipText="Edit receipt"
-                            tooltip="native"
-                            variant="ghost"
-                            size="sm"
-                            icon={<Pencil />}
-                            onClick={() => openEditDialog(receipt)}
-                          />
-                          <IconButton
-                            label={`Delete ${receipt.receipt_number}`}
-                            tooltipText="Delete receipt"
-                            tooltip="native"
-                            variant="danger"
-                            size="sm"
-                            icon={<Trash2 />}
-                            onClick={() => {
-                              setDeleteError(null)
-                              setDeleteTarget(receipt)
-                            }}
-                          />
-                        </div>
-                      </td>
-                    </tr>
-                  )
-                })}
+                      return (
+                        <Fragment key={group.key}>
+                          <tr className="bg-slate-50/80">
+                            <th scope="rowgroup" colSpan={8} className="px-4 py-2 text-left">
+                              <div className="flex flex-wrap items-center justify-between gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => toggleMonth(group.key)}
+                                  aria-expanded={!collapsed}
+                                  aria-label={`${collapsed ? 'Expand' : 'Collapse'} ${group.fullLabel}`}
+                                  className="inline-flex items-center gap-2 rounded-md text-xs font-semibold text-slate-700 transition hover:text-brand-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
+                                >
+                                  {collapsed ? (
+                                    <ChevronRight className="h-4 w-4 text-slate-400" />
+                                  ) : (
+                                    <ChevronDown className="h-4 w-4 text-slate-400" />
+                                  )}
+                                  {group.fullLabel}
+                                  <span className="font-normal text-slate-500">
+                                    {group.count} receipt{group.count === 1 ? '' : 's'}
+                                  </span>
+                                </button>
+                                <span className="text-xs font-medium tabular-nums text-slate-700">
+                                  {formatCurrency(group.total)}
+                                </span>
+                              </div>
+                            </th>
+                          </tr>
+                          {!collapsed && group.receipts.map(renderReceiptRow)}
+                        </Fragment>
+                      )
+                    })
+                  : filteredReceipts.map(renderReceiptRow)}
               </tbody>
             </table>
           </div>

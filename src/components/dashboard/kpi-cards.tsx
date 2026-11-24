@@ -12,6 +12,9 @@ type KpiCardsProps = {
   proformaCount: number
   taxValue: number
   taxCount: number
+  receiptValue: number
+  receiptCount: number
+  outstandingValue: number
   pendingCount: number
   billedCount: number
   onProformaCount: number
@@ -26,6 +29,9 @@ export function KpiCards({
   proformaCount,
   taxValue,
   taxCount,
+  receiptValue,
+  receiptCount,
+  outstandingValue,
   pendingCount,
   billedCount,
   onProformaCount,
@@ -34,9 +40,10 @@ export function KpiCards({
   const articleTotal = pendingCount + billedCount
   const pendingPercent = articleTotal > 0 ? (pendingCount / articleTotal) * 100 : 0
   const billedPercent = articleTotal > 0 ? (billedCount / articleTotal) * 100 : 0
+  const collectedPercent = taxValue > 0 ? Math.min((receiptValue / taxValue) * 100, 100) : 0
 
   return (
-    <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+    <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
       <KpiCard
         href="/proforma-invoices"
         label="Total proforma value"
@@ -54,6 +61,58 @@ export function KpiCards({
         icon={<ReceiptIcon className="h-5 w-5" />}
         tone="sky"
       />
+
+      <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <Link
+              href="/payment-receipts"
+              className="inline-flex items-center gap-1 text-xs font-semibold uppercase tracking-[0.12em] text-slate-500 hover:text-brand-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
+            >
+              Tax invoices vs receipts
+              <ArrowUpRight className="h-3.5 w-3.5" />
+            </Link>
+
+            <div className="mt-3 grid grid-cols-2 gap-4">
+              <Link
+                href="/tax-invoices"
+                className="min-w-0 rounded-lg transition hover:bg-emerald-50/70 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
+                title="Open tax invoices"
+              >
+                <p className="text-xs text-slate-500">Invoiced</p>
+                <p className="mt-0.5 truncate text-xl font-semibold tracking-tight text-emerald-700 tabular-nums">
+                  {formatCurrency(taxValue)}
+                </p>
+              </Link>
+              <Link
+                href="/payment-receipts"
+                className="min-w-0 rounded-lg transition hover:bg-amber-50/70 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
+                title="Open payment receipts"
+              >
+                <p className="text-xs text-slate-500">Collected</p>
+                <p className="mt-0.5 truncate text-xl font-semibold tracking-tight text-amber-600 tabular-nums">
+                  {formatCurrency(receiptValue)}
+                </p>
+              </Link>
+            </div>
+          </div>
+
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-50 text-emerald-700">
+            <CurrencyIcon className="h-5 w-5" />
+          </span>
+        </div>
+
+        <div className="mt-3 flex h-2 overflow-hidden rounded-full bg-slate-100" aria-hidden="true">
+          <div style={{ width: `${collectedPercent}%` }} className="bg-emerald-500" />
+        </div>
+
+        <p className="mt-2 truncate text-xs text-slate-500">
+          {formatCurrency(outstandingValue)} outstanding ·{' '}
+          <Link href="/payment-receipts" className="hover:text-brand-700 hover:underline">
+            {receiptCount} receipt{receiptCount === 1 ? '' : 's'}
+          </Link>
+        </p>
+      </article>
 
       <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
         <div className="flex items-start justify-between gap-3">
@@ -162,8 +221,8 @@ function KpiCard({
 
 export function KpiCardsSkeleton() {
   return (
-    <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3" aria-hidden="true">
-      {Array.from({ length: 3 }).map((_, index) => (
+    <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4" aria-hidden="true">
+      {Array.from({ length: 4 }).map((_, index) => (
         <div key={index} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <div className="flex items-start justify-between gap-3">
             <div className="flex-1 space-y-3">

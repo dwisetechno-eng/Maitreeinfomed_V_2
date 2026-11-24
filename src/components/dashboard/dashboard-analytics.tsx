@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 
 import { ArticleTimeline } from '@/components/dashboard/article-timeline'
 import { InvoicePipeline } from '@/components/dashboard/invoice-pipeline'
+import { InvoiceTimeline } from '@/components/dashboard/invoice-timeline'
 import { KpiCards, KpiCardsSkeleton } from '@/components/dashboard/kpi-cards'
 import { ModuleLinks } from '@/components/dashboard/module-links'
 import { StatusBreakdown } from '@/components/dashboard/status-breakdown'
@@ -17,7 +18,9 @@ import { Alert } from '@/components/ui/alert'
 import { RefreshIcon, SpinnerIcon } from '@/components/ui/icons'
 import {
   invoiceValue,
+  toNumber,
   type DashboardArticle,
+  type DashboardReceipt,
   type InvoiceRow,
   type NamedOption,
   type StatusMasterRow,
@@ -27,6 +30,7 @@ import { createClient } from '@/utils/supabase/client'
 type DashboardSnapshot = {
   proforma: InvoiceRow[]
   tax: InvoiceRow[]
+  receipts: DashboardReceipt[]
   articles: DashboardArticle[]
   statuses: StatusMasterRow[]
   departments: NamedOption[]
@@ -59,27 +63,38 @@ export function DashboardAnalytics() {
     try {
       const supabase = createClient()
 
-      const [proformaResult, taxResult, articlesResult, statusesResult, departmentsResult, clientsResult] =
-        await Promise.all([
-          supabase.from('proforma_invoices').select('*'),
-          supabase.from('tax_invoices').select('*'),
-          supabase
-            .from('article_requests')
-            .select(
-              'id, client_id, department_id, status_code, request_date, created_at, proforma_invoice_id, tax_invoice_id'
-            ),
-          supabase
-            .from('article_status_master')
-            .select('status_code, status_label, display_order, description')
-            .order('display_order', { ascending: true })
-            .order('status_code', { ascending: true }),
-          supabase.from('departments').select('id, department_name').order('department_name'),
-          supabase.from('clients').select('id, company_name').order('company_name'),
-        ])
+      const [
+        proformaResult,
+        taxResult,
+        receiptsResult,
+        articlesResult,
+        statusesResult,
+        departmentsResult,
+        clientsResult,
+      ] = await Promise.all([
+        supabase.from('proforma_invoices').select('*'),
+        supabase.from('tax_invoices').select('*'),
+        supabase
+          .from('payment_receipts')
+          .select('id, receipt_date, amount_received, created_at'),
+        supabase
+          .from('article_requests')
+          .select(
+            'id, client_id, department_id, status_code, request_date, created_at, proforma_invoice_id, tax_invoice_id'
+          ),
+        supabase
+          .from('article_status_master')
+          .select('status_code, status_label, display_order, description')
+          .order('display_order', { ascending: true })
+          .order('status_code', { ascending: true }),
+        supabase.from('departments').select('id, department_name').order('department_name'),
+        supabase.from('clients').select('id, company_name').order('company_name'),
+      ])
 
       const firstError =
         proformaResult.error ??
         taxResult.error ??
+        receiptsResult.error ??
         articlesResult.error ??
         statusesResult.error ??
         departmentsResult.error ??
@@ -92,6 +107,7 @@ export function DashboardAnalytics() {
       setSnapshot({
         proforma: (proformaResult.data ?? []) as InvoiceRow[],
         tax: (taxResult.data ?? []) as InvoiceRow[],
+        receipts: (receiptsResult.data ?? []) as DashboardReceipt[],
         articles: (articlesResult.data ?? []) as DashboardArticle[],
         statuses: (statusesResult.data ?? []) as StatusMasterRow[],
         departments: ((departmentsResult.data ?? []) as { id: string; department_name: string }[]).map(
@@ -145,6 +161,11 @@ export function DashboardAnalytics() {
       0
     )
     const taxValue = snapshot.tax.reduce((total, invoice) => total + invoiceValue(invoice), 0)
+    const receiptValue = snapshot.receipts.reduce(
+      (total, receipt) => total + toNumber(receipt.amount_received),
+      0
+    )
+    const outstandingValue = Math.max(0, taxValue - receiptValue)
 
     let pending = 0
     let onProforma = 0
@@ -165,6 +186,9 @@ export function DashboardAnalytics() {
       proformaCount: snapshot.proforma.length,
       taxValue,
       taxCount: snapshot.tax.length,
+      receiptValue,
+      receiptCount: snapshot.receipts.length,
+      outstandingValue,
       pending,
       onProforma,
       taxInvoiced,
@@ -233,6 +257,7 @@ export function DashboardAnalytics() {
             <PanelSkeleton />
             <PanelSkeleton />
           </div>
+          <PanelSkeleton />
           <div className="grid gap-4 xl:grid-cols-5">
             <PanelSkeleton className="xl:col-span-3" />
             <PanelSkeleton className="xl:col-span-2" />
@@ -262,6 +287,9 @@ export function DashboardAnalytics() {
               proformaCount={kpis.proformaCount}
               taxValue={kpis.taxValue}
               taxCount={kpis.taxCount}
+              receiptValue={kpis.receiptValue}
+              receiptCount={kpis.receiptCount}
+              outstandingValue={kpis.outstandingValue}
               pendingCount={kpis.pending}
               billedCount={kpis.billed}
               onProformaCount={kpis.onProforma}
@@ -270,6 +298,12 @@ export function DashboardAnalytics() {
           )}
 
           <InvoicePipeline proforma={snapshot.proforma} tax={snapshot.tax} />
+
+          <InvoiceTimeline
+            proforma={snapshot.proforma}
+            tax={snapshot.tax}
+            receipts={snapshot.receipts}
+          />
 
           <div className="grid gap-4 xl:grid-cols-5">
             <div className="xl:col-span-3">

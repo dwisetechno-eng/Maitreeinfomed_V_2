@@ -17,7 +17,16 @@ export type InvoiceRow = {
   tax_invoice_id?: string | null
   amount_paid?: number | null
   tax_total?: number | null
+  pi_date?: string | null
+  invoice_date?: string | null
   due_date?: string | null
+  created_at?: string | null
+}
+
+export type DashboardReceipt = {
+  id: string
+  receipt_date: string | null
+  amount_received: number | string | null
   created_at?: string | null
 }
 
