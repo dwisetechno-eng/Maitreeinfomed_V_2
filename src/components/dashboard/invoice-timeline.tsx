@@ -23,7 +23,7 @@ type InvoiceTimelineProps = {
 type TimelineViewMode = 'combined' | 'separate'
 
 export function InvoiceTimeline({ proforma, tax, receipts }: InvoiceTimelineProps) {
-  const [viewMode, setViewMode] = useState<TimelineViewMode>('combined')
+  const [viewMode, setViewMode] = useState<TimelineViewMode>('separate')
   const [metric, setMetric] = useState<TimelineMetric>('value')
 
   const timeline = useMemo(
@@ -58,19 +58,19 @@ export function InvoiceTimeline({ proforma, tax, receipts }: InvoiceTimelineProp
           >
             <button
               type="button"
-              onClick={() => setViewMode('combined')}
-              aria-pressed={viewMode === 'combined'}
-              className={toggleClass(viewMode === 'combined')}
-            >
-              Combined
-            </button>
-            <button
-              type="button"
               onClick={() => setViewMode('separate')}
               aria-pressed={viewMode === 'separate'}
               className={toggleClass(viewMode === 'separate')}
             >
               Separate
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode('combined')}
+              aria-pressed={viewMode === 'combined'}
+              className={toggleClass(viewMode === 'combined')}
+            >
+              Combined
             </button>
           </div>
 
@@ -121,7 +121,25 @@ export function InvoiceTimeline({ proforma, tax, receipts }: InvoiceTimelineProp
 
           <div className="mt-6">
             <p className="text-[11px] text-slate-400">Max {formatAxis(timeline.maxTotal)}</p>
-            <div className="relative mt-2 h-52">
+            <div className="mt-3 flex gap-2 sm:gap-4">
+              {timeline.buckets.map((bucket) => {
+                const total = TIMELINE_SERIES.reduce(
+                  (sum, series) => sum + seriesValue(bucket, series.key),
+                  0
+                )
+
+                return (
+                  <div
+                    key={bucket.key}
+                    className="min-w-0 flex-1 text-center text-[10px] font-medium tabular-nums text-slate-600"
+                    title={formatValue(total)}
+                  >
+                    {total > 0 ? formatAxis(total) : ''}
+                  </div>
+                )
+              })}
+            </div>
+            <div className="relative mt-1 h-52">
               {[0, 25, 50, 75, 100].map((percent) => (
                 <div
                   key={percent}
@@ -224,7 +242,23 @@ export function InvoiceTimeline({ proforma, tax, receipts }: InvoiceTimelineProp
                   {timeline.counts[series.key] === 1 ? '' : 's'} · max {formatAxis(seriesMax)}
                 </p>
 
-                <div className="relative mt-4 h-28">
+                <div className="mt-3 flex gap-1">
+                  {timeline.buckets.map((bucket) => {
+                    const value = seriesValue(bucket, series.key)
+
+                    return (
+                      <span
+                        key={bucket.key}
+                        className="min-w-0 flex-1 truncate text-center text-[10px] font-medium tabular-nums text-slate-600"
+                        title={formatValue(value)}
+                      >
+                        {value > 0 ? formatAxis(value) : ''}
+                      </span>
+                    )
+                  })}
+                </div>
+
+                <div className="relative mt-1 h-28">
                   {[0, 50, 100].map((percent) => (
                     <div
                       key={percent}

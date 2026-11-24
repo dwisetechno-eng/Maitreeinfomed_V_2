@@ -38,6 +38,7 @@ import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { IconButton } from '@/components/ui/icon-button'
 import { InboxIcon, PlusIcon, SpinnerIcon } from '@/components/ui/icons'
 import { Modal } from '@/components/ui/modal'
+import { SortableHeader } from '@/components/ui/sortable-header'
 import {
   groupInvoicesByClientAndDepartment,
   invoiceDepartmentRef,
@@ -52,6 +53,7 @@ import {
   recalculateTaxInvoiceTotals,
 } from '@/lib/invoice-links'
 import { isMissingColumnError, isMissingTableError } from '@/lib/supabase-errors'
+import { nextTableSort, sortTableRows, type TableSort } from '@/lib/table-sort'
 import {
   effectiveTaxStatus,
   parseLinkedProformaIds,
@@ -65,6 +67,18 @@ import {
 import { createClient } from '@/utils/supabase/client'
 
 type InvoiceWithLinks = TaxInvoiceRow & { tax_invoice_number: string | null }
+
+type TaxSortKey =
+  | 'number'
+  | 'date'
+  | 'poNumber'
+  | 'poDate'
+  | 'client'
+  | 'subtotal'
+  | 'gst'
+  | 'total'
+  | 'status'
+  | 'paid'
 
 type LinkedProforma = ProformaForTaxInvoice
 
@@ -93,6 +107,10 @@ export function TaxInvoiceManager() {
   const [departmentFilter, setDepartmentFilter] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
   const [grouped, setGrouped] = useState(true)
+  const [sort, setSort] = useState<TableSort<TaxSortKey>>({
+    key: 'date',
+    direction: 'desc',
+  })
   const [collapsedClients, setCollapsedClients] = useState<Set<string>>(() => new Set())
   const [collapsedDepartments, setCollapsedDepartments] = useState<Set<string>>(() => new Set())
 
@@ -287,7 +305,7 @@ export function TaxInvoiceManager() {
   const filteredInvoices = useMemo(() => {
     const term = query.trim().toLowerCase()
 
-    return invoices.filter((invoice) => {
+    const filtered = invoices.filter((invoice) => {
       if (clientFilter && invoice.client_id !== clientFilter) {
         return false
       }
@@ -320,6 +338,20 @@ export function TaxInvoiceManager() {
         .toLowerCase()
         .includes(term)
     })
+
+    return sortTableRows(filtered, sort, {
+      number: (invoice) =>
+        invoice.tax_invoice_number?.trim() || invoice.id.slice(0, 8).toUpperCase(),
+      date: (invoice) => invoice.invoice_date ?? invoice.created_at ?? '',
+      poNumber: (invoice) => invoice.po_number ?? '',
+      poDate: (invoice) => invoice.po_date ?? '',
+      client: (invoice) => clientNames.get(invoice.client_id ?? '') ?? '',
+      subtotal: (invoice) => toNumber(invoice.subtotal),
+      gst: (invoice) => toNumber(invoice.tax_total),
+      total: (invoice) => toNumber(invoice.grand_total),
+      status: (invoice) => effectiveTaxStatus(invoice),
+      paid: (invoice) => toNumber(invoice.amount_paid),
+    })
   }, [
     clientFilter,
     clientNames,
@@ -327,9 +359,26 @@ export function TaxInvoiceManager() {
     departmentForInvoice,
     invoices,
     query,
+    sort,
     statusFilter,
     statusLabels,
   ])
+
+  const handleSort = (column: TaxSortKey) => {
+    const descendingFirst: TaxSortKey[] = [
+      'date',
+      'poDate',
+      'subtotal',
+      'gst',
+      'total',
+      'paid',
+    ]
+
+    setSort((current) =>
+      nextTableSort(current, column, descendingFirst.includes(column) ? 'desc' : 'asc')
+    )
+    setGrouped(false)
+  }
 
   const invoiceGroups = useMemo(
     () =>
@@ -1236,36 +1285,50 @@ export function TaxInvoiceManager() {
               <caption className="sr-only">Tax invoices</caption>
               <thead className="bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
                 <tr>
-                  <th scope="col" className="px-4 py-3">
-                    Tax invoice number
-                  </th>
-                  <th scope="col" className="px-4 py-3">
-                    Date
-                  </th>
-                  <th scope="col" className="px-4 py-3">
-                    PO number
-                  </th>
-                  <th scope="col" className="px-4 py-3">
-                    PO date
-                  </th>
-                  <th scope="col" className="px-4 py-3">
-                    Client
-                  </th>
-                  <th scope="col" className="px-4 py-3 text-right">
-                    Subtotal
-                  </th>
-                  <th scope="col" className="px-4 py-3 text-right">
-                    GST
-                  </th>
-                  <th scope="col" className="px-4 py-3 text-right">
-                    Grand total
-                  </th>
-                  <th scope="col" className="px-4 py-3">
-                    Status
-                  </th>
-                  <th scope="col" className="px-4 py-3 text-right">
-                    Amount paid
-                  </th>
+                  <SortableHeader
+                    label="Tax invoice number"
+                    column="number"
+                    sort={sort}
+                    onSort={handleSort}
+                  />
+                  <SortableHeader label="Date" column="date" sort={sort} onSort={handleSort} />
+                  <SortableHeader
+                    label="PO number"
+                    column="poNumber"
+                    sort={sort}
+                    onSort={handleSort}
+                  />
+                  <SortableHeader label="PO date" column="poDate" sort={sort} onSort={handleSort} />
+                  <SortableHeader label="Client" column="client" sort={sort} onSort={handleSort} />
+                  <SortableHeader
+                    label="Subtotal"
+                    column="subtotal"
+                    sort={sort}
+                    onSort={handleSort}
+                    align="right"
+                  />
+                  <SortableHeader
+                    label="GST"
+                    column="gst"
+                    sort={sort}
+                    onSort={handleSort}
+                    align="right"
+                  />
+                  <SortableHeader
+                    label="Grand total"
+                    column="total"
+                    sort={sort}
+                    onSort={handleSort}
+                    align="right"
+                  />
+                  <SortableHeader label="Status" column="status" sort={sort} onSort={handleSort} />
+                  <SortableHeader
+                    label="Amount paid"
+                    column="paid"
+                    sort={sort}
+                    onSort={handleSort}
+                    align="right"
+                  />
                   <th scope="col" className="px-4 py-3 text-right">
                     Actions
                   </th>

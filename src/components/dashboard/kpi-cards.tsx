@@ -43,132 +43,146 @@ export function KpiCards({
   const collectedPercent = taxValue > 0 ? Math.min((receiptValue / taxValue) * 100, 100) : 0
 
   return (
-    <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-      <KpiCard
-        href="/proforma-invoices"
-        label="Total proforma value"
-        value={formatCurrency(proformaValue)}
-        hint={`${proformaCount} proforma invoice${proformaCount === 1 ? '' : 's'} raised`}
-        icon={<CurrencyIcon className="h-5 w-5" />}
-        tone="brand"
-      />
+    <div className="space-y-4">
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+        <KpiCard
+          href="/proforma-invoices"
+          label="Total proforma value"
+          value={formatCurrency(proformaValue)}
+          hint={`${proformaCount} proforma invoice${proformaCount === 1 ? '' : 's'} raised`}
+          icon={<CurrencyIcon className="h-5 w-5" />}
+          tone="brand"
+        />
 
-      <KpiCard
-        href="/tax-invoices"
-        label="Tax invoice receivables"
-        value={formatCurrency(taxValue)}
-        hint={`${taxCount} tax invoice${taxCount === 1 ? '' : 's'} on record`}
-        icon={<ReceiptIcon className="h-5 w-5" />}
-        tone="sky"
-      />
+        <KpiCard
+          href="/tax-invoices"
+          label="Tax invoice receivables"
+          value={formatCurrency(taxValue)}
+          hint={`${taxCount} tax invoice${taxCount === 1 ? '' : 's'} on record`}
+          detail={`${formatCurrency(receiptValue)} payment receipts till date`}
+          icon={<ReceiptIcon className="h-5 w-5" />}
+          tone="sky"
+        />
 
-      <article className="rounded-2xl border border-amber-100 bg-amber-50/35 p-5 shadow-sm">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <Link
-              href="/payment-receipts"
-              className="inline-flex items-center gap-1 text-xs font-semibold uppercase tracking-[0.12em] text-slate-500 hover:text-brand-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
-            >
-              Tax invoices vs receipts
-              <ArrowUpRight className="h-3.5 w-3.5" />
-            </Link>
+        <KpiCard
+          href="/payment-receipts"
+          label="Payment receipts"
+          value={String(receiptCount)}
+          hint={`${formatCurrency(receiptValue)} collected till date`}
+          icon={<ReceiptIcon className="h-5 w-5" />}
+          tone="emerald"
+        />
+      </div>
 
-            <div className="mt-3 grid grid-cols-2 gap-4">
-              <Link
-                href="/tax-invoices"
-                className="min-w-0 rounded-lg transition hover:bg-emerald-50/70 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
-                title="Open tax invoices"
-              >
-                <p className="text-xs text-slate-500">Invoiced</p>
-                <p className="mt-0.5 truncate text-xl font-semibold tracking-tight text-emerald-700 tabular-nums">
-                  {formatCurrency(taxValue)}
-                </p>
-              </Link>
+      <div className="grid gap-4 sm:grid-cols-2">
+        <article className="rounded-2xl border border-amber-100 bg-amber-50/35 p-5 shadow-sm">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
               <Link
                 href="/payment-receipts"
-                className="min-w-0 rounded-lg transition hover:bg-amber-50/70 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
-                title="Open payment receipts"
+                className="inline-flex items-center gap-1 text-xs font-semibold uppercase tracking-[0.12em] text-slate-500 hover:text-brand-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
               >
-                <p className="text-xs text-slate-500">Collected</p>
-                <p className="mt-0.5 truncate text-xl font-semibold tracking-tight text-amber-600 tabular-nums">
-                  {formatCurrency(receiptValue)}
-                </p>
+                Tax invoices vs receipts
+                <ArrowUpRight className="h-3.5 w-3.5" />
               </Link>
+
+              <div className="mt-3 grid grid-cols-2 gap-4">
+                <Link
+                  href="/tax-invoices"
+                  className="min-w-0 rounded-lg transition hover:bg-emerald-50/70 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
+                  title="Open tax invoices"
+                >
+                  <p className="text-xs text-slate-500">Invoiced</p>
+                  <p className="mt-0.5 truncate text-xl font-semibold tracking-tight text-emerald-700 tabular-nums">
+                    {formatCurrency(taxValue)}
+                  </p>
+                </Link>
+                <Link
+                  href="/payment-receipts"
+                  className="min-w-0 rounded-lg transition hover:bg-amber-50/70 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
+                  title="Open payment receipts"
+                >
+                  <p className="text-xs text-slate-500">Collected</p>
+                  <p className="mt-0.5 truncate text-xl font-semibold tracking-tight text-amber-600 tabular-nums">
+                    {formatCurrency(receiptValue)}
+                  </p>
+                </Link>
+              </div>
             </div>
+
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-50 text-emerald-700">
+              <CurrencyIcon className="h-5 w-5" />
+            </span>
           </div>
 
-          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-50 text-emerald-700">
-            <CurrencyIcon className="h-5 w-5" />
-          </span>
-        </div>
+          <div className="mt-3 flex h-2 overflow-hidden rounded-full bg-slate-100" aria-hidden="true">
+            <div style={{ width: `${collectedPercent}%` }} className="bg-emerald-500" />
+          </div>
 
-        <div className="mt-3 flex h-2 overflow-hidden rounded-full bg-slate-100" aria-hidden="true">
-          <div style={{ width: `${collectedPercent}%` }} className="bg-emerald-500" />
-        </div>
-
-        <p className="mt-2 truncate text-xs text-slate-500">
-          {formatCurrency(outstandingValue)} outstanding ·{' '}
-          <Link href="/payment-receipts" className="hover:text-brand-700 hover:underline">
-            {receiptCount} receipt{receiptCount === 1 ? '' : 's'}
-          </Link>
-        </p>
-      </article>
-
-      <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <Link
-              href="/article-requests"
-              className="inline-flex items-center gap-1 text-xs font-semibold uppercase tracking-[0.12em] text-slate-500 hover:text-brand-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
-            >
-              Pending vs billed articles
-              <ArrowUpRight className="h-3.5 w-3.5" />
+          <p className="mt-2 truncate text-xs text-slate-500">
+            {formatCurrency(outstandingValue)} outstanding ·{' '}
+            <Link href="/payment-receipts" className="hover:text-brand-700 hover:underline">
+              {receiptCount} receipt{receiptCount === 1 ? '' : 's'} recorded
             </Link>
+          </p>
+        </article>
 
-            <div className="mt-3 grid grid-cols-2 gap-4">
+        <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
               <Link
-                href="/article-requests?billing=pending"
-                className="rounded-lg transition hover:bg-amber-50/70 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
-                title="Open pending article requests"
+                href="/article-requests"
+                className="inline-flex items-center gap-1 text-xs font-semibold uppercase tracking-[0.12em] text-slate-500 hover:text-brand-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
               >
-                <p className="text-xs text-slate-500">Pending</p>
-                <p className="mt-0.5 text-2xl font-semibold tracking-tight text-amber-600 tabular-nums">
-                  {pendingCount}
-                </p>
+                Pending vs billed articles
+                <ArrowUpRight className="h-3.5 w-3.5" />
               </Link>
-              <Link
-                href="/article-requests?billing=billed"
-                className="rounded-lg transition hover:bg-brand-50/70 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
-                title="Open billed article requests"
-              >
-                <p className="text-xs text-slate-500">Billed</p>
-                <p className="mt-0.5 text-2xl font-semibold tracking-tight text-brand-700 tabular-nums">
-                  {billedCount}
-                </p>
-              </Link>
+
+              <div className="mt-3 grid grid-cols-2 gap-4">
+                <Link
+                  href="/article-requests?billing=pending"
+                  className="rounded-lg transition hover:bg-amber-50/70 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
+                  title="Open pending article requests"
+                >
+                  <p className="text-xs text-slate-500">Pending</p>
+                  <p className="mt-0.5 text-2xl font-semibold tracking-tight text-amber-600 tabular-nums">
+                    {pendingCount}
+                  </p>
+                </Link>
+                <Link
+                  href="/article-requests?billing=billed"
+                  className="rounded-lg transition hover:bg-brand-50/70 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
+                  title="Open billed article requests"
+                >
+                  <p className="text-xs text-slate-500">Billed</p>
+                  <p className="mt-0.5 text-2xl font-semibold tracking-tight text-brand-700 tabular-nums">
+                    {billedCount}
+                  </p>
+                </Link>
+              </div>
             </div>
+
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-amber-50 text-amber-700">
+              <ClockIcon className="h-5 w-5" />
+            </span>
           </div>
 
-          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-amber-50 text-amber-700">
-            <ClockIcon className="h-5 w-5" />
-          </span>
-        </div>
+          <div className="mt-3 flex h-2 overflow-hidden rounded-full bg-slate-100" aria-hidden="true">
+            <div style={{ width: `${pendingPercent}%` }} className="bg-amber-400" />
+            <div style={{ width: `${billedPercent}%` }} className="bg-brand-500" />
+          </div>
 
-        <div className="mt-3 flex h-2 overflow-hidden rounded-full bg-slate-100" aria-hidden="true">
-          <div style={{ width: `${pendingPercent}%` }} className="bg-amber-400" />
-          <div style={{ width: `${billedPercent}%` }} className="bg-brand-500" />
-        </div>
-
-        <p className="mt-2 text-xs text-slate-500">
-          <Link href="/article-requests?status=PI_GENERATED" className="hover:text-brand-700 hover:underline">
-            {onProformaCount} awaiting tax invoice
-          </Link>{' '}
-          ·{' '}
-          <Link href="/article-requests?status=COMPLETED" className="hover:text-brand-700 hover:underline">
-            {taxInvoicedCount} tax invoiced
-          </Link>
-        </p>
-      </article>
+          <p className="mt-2 text-xs text-slate-500">
+            <Link href="/article-requests?status=PI_GENERATED" className="hover:text-brand-700 hover:underline">
+              {onProformaCount} awaiting tax invoice
+            </Link>{' '}
+            ·{' '}
+            <Link href="/article-requests?status=COMPLETED" className="hover:text-brand-700 hover:underline">
+              {taxInvoicedCount} tax invoiced
+            </Link>
+          </p>
+        </article>
+      </div>
     </div>
   )
 }
@@ -178,6 +192,7 @@ function KpiCard({
   label,
   value,
   hint,
+  detail,
   icon,
   tone,
 }: {
@@ -185,16 +200,23 @@ function KpiCard({
   label: string
   value: string
   hint: string
+  detail?: string
   icon: ReactNode
-  tone: 'brand' | 'sky'
+  tone: 'brand' | 'sky' | 'emerald'
 }) {
   const toneClasses =
-    tone === 'brand' ? 'bg-brand-50 text-brand-700' : 'bg-sky-50 text-sky-700'
+    tone === 'brand'
+      ? 'bg-brand-50 text-brand-700'
+      : tone === 'sky'
+        ? 'bg-sky-50 text-sky-700'
+        : 'bg-emerald-50 text-emerald-700'
 
   const cardTone =
     tone === 'brand'
       ? 'border-brand-100 bg-brand-50/40 hover:border-brand-200 hover:bg-brand-50/70'
-      : 'border-sky-100 bg-sky-50/40 hover:border-sky-200 hover:bg-sky-50/70'
+      : tone === 'sky'
+        ? 'border-sky-100 bg-sky-50/40 hover:border-sky-200 hover:bg-sky-50/70'
+        : 'border-emerald-100 bg-emerald-50/40 hover:border-emerald-200 hover:bg-emerald-50/70'
 
   return (
     <Link
@@ -224,23 +246,34 @@ function KpiCard({
       </div>
 
       <p className="mt-2 text-xs text-slate-500">{hint}</p>
+      {detail && <p className="mt-1 text-xs font-medium text-sky-700">{detail}</p>}
     </Link>
   )
 }
 
 export function KpiCardsSkeleton() {
   return (
-    <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4" aria-hidden="true">
-      {Array.from({ length: 4 }).map((_, index) => (
-        <div key={index} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-          <div className="flex items-start justify-between gap-3">
-            <div className="flex-1 space-y-3">
-              <div className="h-3 w-32 animate-pulse rounded bg-slate-100" />
-              <div className="h-7 w-40 animate-pulse rounded bg-slate-100" />
-              <div className="h-3 w-24 animate-pulse rounded bg-slate-100" />
+    <div className="space-y-4" aria-hidden="true">
+      {[0, 1].map((row) => (
+        <div
+          key={row}
+          className={`grid gap-4 sm:grid-cols-2 ${row === 0 ? 'xl:grid-cols-3' : ''}`}
+        >
+          {Array.from({ length: row === 0 ? 3 : 2 }).map((_, index) => (
+            <div
+              key={`${row}-${index}`}
+              className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex-1 space-y-3">
+                  <div className="h-3 w-32 animate-pulse rounded bg-slate-100" />
+                  <div className="h-7 w-40 animate-pulse rounded bg-slate-100" />
+                  <div className="h-3 w-24 animate-pulse rounded bg-slate-100" />
+                </div>
+                <div className="h-10 w-10 animate-pulse rounded-xl bg-slate-100" />
+              </div>
             </div>
-            <div className="h-10 w-10 animate-pulse rounded-xl bg-slate-100" />
-          </div>
+          ))}
         </div>
       ))}
     </div>

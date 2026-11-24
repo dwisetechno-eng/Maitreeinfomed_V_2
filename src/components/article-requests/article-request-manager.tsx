@@ -39,6 +39,7 @@ import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { IconButton } from '@/components/ui/icon-button'
 import { Modal } from '@/components/ui/modal'
 import { SpinnerIcon } from '@/components/ui/icons'
+import { SortableHeader } from '@/components/ui/sortable-header'
 import {
   getArticleBatchId,
   getArticleBatchTag,
@@ -52,6 +53,11 @@ import {
   isMissingColumnError,
   isMissingTableError,
 } from '@/lib/supabase-errors'
+import {
+  nextTableSort,
+  sortTableRows,
+  type TableSort,
+} from '@/lib/table-sort'
 import { createClient } from '@/utils/supabase/client'
 
 type ClientRow = { id: string; company_name: string }
@@ -97,6 +103,21 @@ type ArticleRow = {
   batch_tag?: string | null
   sr_no?: number | null
 }
+
+type ArticleSortKey =
+  | 'requested'
+  | 'client'
+  | 'department'
+  | 'contact'
+  | 'batch'
+  | 'srNo'
+  | 'article'
+  | 'vendor'
+  | 'cost'
+  | 'qty'
+  | 'totalCost'
+  | 'urgency'
+  | 'status'
 
 type FormState = {
   client_id: string
@@ -156,6 +177,10 @@ export function ArticleRequestManager() {
   const [proformaRows, setProformaRows] = useState<ProformaInfoRow[]>([])
   const [taxRows, setTaxRows] = useState<TaxInfoRow[]>([])
   const [grouped, setGrouped] = useState(true)
+  const [sort, setSort] = useState<TableSort<ArticleSortKey>>({
+    key: 'requested',
+    direction: 'desc',
+  })
 
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -483,7 +508,26 @@ export function ArticleRequestManager() {
         .includes(term)
     })
 
-    return filtered.sort(compareLatestFirst)
+    return sortTableRows(
+      filtered,
+      sort,
+      {
+        requested: (article) => article.request_date ?? article.created_at ?? '',
+        client: (article) => clientNames.get(article.client_id ?? '') ?? '',
+        department: (article) => departmentNames.get(article.department_id ?? '') ?? '',
+        contact: (article) => contactNames.get(article.contact_id ?? '') ?? '',
+        batch: (article) => displayBatch(article) ?? '',
+        srNo: (article) => article.sr_no,
+        article: displayDescription,
+        vendor: (article) => vendorNames.get(article.vendor_id ?? '') ?? '',
+        cost: unitCost,
+        qty: unitQuantity,
+        totalCost: (article) => roundMoney(unitCost(article) * unitQuantity(article)),
+        urgency: (article) => normalizeUrgency(article.urgency),
+        status: (article) => articleStatuses.get(article.id) ?? '',
+      },
+      compareLatestFirst
+    )
   }, [
     articles,
     articleStatuses,
@@ -496,11 +540,31 @@ export function ArticleRequestManager() {
     departmentFilter,
     departmentNames,
     query,
+    sort,
     statusFilter,
     urgencyFilter,
     vendorFilter,
     vendorNames,
   ])
+
+  const handleSort = (column: ArticleSortKey) => {
+    const numericColumns: ArticleSortKey[] = [
+      'requested',
+      'srNo',
+      'cost',
+      'qty',
+      'totalCost',
+    ]
+
+    setSort((current) =>
+      nextTableSort(
+        current,
+        column,
+        numericColumns.includes(column) ? 'desc' : 'asc'
+      )
+    )
+    setGrouped(false)
+  }
 
   const articleGroups = useMemo<ArticleGroup[]>(() => {
     const clients = new Map<
@@ -1483,45 +1547,101 @@ export function ArticleRequestManager() {
                       className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
                     />
                   </th>
-                  <th scope="col" className="px-3 py-3">
-                    Requested
-                  </th>
-                  <th scope="col" className="px-3 py-3">
-                    Client
-                  </th>
-                  <th scope="col" className="px-3 py-3">
-                    Department
-                  </th>
-                  <th scope="col" className="px-3 py-3">
-                    Contact
-                  </th>
-                  <th scope="col" className="px-3 py-3">
-                    Batch
-                  </th>
-                  <th scope="col" className="px-3 py-3 text-right">
-                    Sr No
-                  </th>
-                  <th scope="col" className="px-3 py-3">
-                    Article
-                  </th>
-                  <th scope="col" className="px-3 py-3">
-                    Vendor
-                  </th>
-                  <th scope="col" className="px-3 py-3 text-right">
-                    Cost
-                  </th>
-                  <th scope="col" className="px-3 py-3 text-right">
-                    Qty
-                  </th>
-                  <th scope="col" className="px-3 py-3 text-right">
-                    Total cost
-                  </th>
-                  <th scope="col" className="px-3 py-3">
-                    Urgency
-                  </th>
-                  <th scope="col" className="px-3 py-3">
-                    Status
-                  </th>
+                  <SortableHeader
+                    label="Requested"
+                    column="requested"
+                    sort={sort}
+                    onSort={handleSort}
+                    className="px-3 py-3"
+                  />
+                  <SortableHeader
+                    label="Client"
+                    column="client"
+                    sort={sort}
+                    onSort={handleSort}
+                    className="px-3 py-3"
+                  />
+                  <SortableHeader
+                    label="Department"
+                    column="department"
+                    sort={sort}
+                    onSort={handleSort}
+                    className="px-3 py-3"
+                  />
+                  <SortableHeader
+                    label="Contact"
+                    column="contact"
+                    sort={sort}
+                    onSort={handleSort}
+                    className="px-3 py-3"
+                  />
+                  <SortableHeader
+                    label="Batch"
+                    column="batch"
+                    sort={sort}
+                    onSort={handleSort}
+                    className="px-3 py-3"
+                  />
+                  <SortableHeader
+                    label="Sr No"
+                    column="srNo"
+                    sort={sort}
+                    onSort={handleSort}
+                    align="right"
+                    className="px-3 py-3"
+                  />
+                  <SortableHeader
+                    label="Article"
+                    column="article"
+                    sort={sort}
+                    onSort={handleSort}
+                    className="px-3 py-3"
+                  />
+                  <SortableHeader
+                    label="Vendor"
+                    column="vendor"
+                    sort={sort}
+                    onSort={handleSort}
+                    className="px-3 py-3"
+                  />
+                  <SortableHeader
+                    label="Cost"
+                    column="cost"
+                    sort={sort}
+                    onSort={handleSort}
+                    align="right"
+                    className="px-3 py-3"
+                  />
+                  <SortableHeader
+                    label="Qty"
+                    column="qty"
+                    sort={sort}
+                    onSort={handleSort}
+                    align="right"
+                    className="px-3 py-3"
+                  />
+                  <SortableHeader
+                    label="Total cost"
+                    column="totalCost"
+                    sort={sort}
+                    onSort={handleSort}
+                    align="right"
+                    className="px-3 py-3"
+                  />
+                  <SortableHeader
+                    label="Urgency"
+                    column="urgency"
+                    sort={sort}
+                    onSort={handleSort}
+                    className="px-3 py-3"
+                  />
+                  <SortableHeader
+                    label="Status"
+                    column="status"
+                    sort={sort}
+                    onSort={handleSort}
+                    className="px-3 py-3"
+                  />
                   <th scope="col" className="px-3 py-3 text-right">
                     Actions
                   </th>

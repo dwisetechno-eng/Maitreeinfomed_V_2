@@ -41,7 +41,9 @@ import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { IconButton } from '@/components/ui/icon-button'
 import { Modal } from '@/components/ui/modal'
 import { SpinnerIcon } from '@/components/ui/icons'
+import { SortableHeader } from '@/components/ui/sortable-header'
 import { isMissingTableError } from '@/lib/supabase-errors'
+import { nextTableSort, sortTableRows, type TableSort } from '@/lib/table-sort'
 import { groupReceiptsByMonth } from '@/lib/receipt-grouping'
 import { recalculateTaxInvoicePayment } from '@/lib/invoice-links'
 import { createClient } from '@/utils/supabase/client'
@@ -59,6 +61,15 @@ type ReceiptRow = {
   status_code: string | null
   created_at: string | null
 }
+
+type ReceiptSortKey =
+  | 'number'
+  | 'date'
+  | 'client'
+  | 'amount'
+  | 'mode'
+  | 'reference'
+  | 'status'
 
 type FormState = {
   receipt_number: string
@@ -109,6 +120,10 @@ export function PaymentReceiptManager() {
   const [clientFilter, setClientFilter] = useState('')
   const [modeFilter, setModeFilter] = useState('')
   const [groupByMonth, setGroupByMonth] = useState(true)
+  const [sort, setSort] = useState<TableSort<ReceiptSortKey>>({
+    key: 'date',
+    direction: 'desc',
+  })
   const [collapsedMonths, setCollapsedMonths] = useState<Set<string>>(new Set())
 
   const [dialog, setDialog] = useState<DialogState | null>(null)
@@ -208,7 +223,7 @@ export function PaymentReceiptManager() {
   const filteredReceipts = useMemo(() => {
     const term = query.trim().toLowerCase()
 
-    return receipts.filter((receipt) => {
+    const filtered = receipts.filter((receipt) => {
       if (clientFilter && receipt.client_id !== clientFilter) {
         return false
       }
@@ -231,7 +246,27 @@ export function PaymentReceiptManager() {
         .toLowerCase()
         .includes(term)
     })
-  }, [clientFilter, clientNames, modeFilter, query, receipts])
+
+    return sortTableRows(filtered, sort, {
+      number: (receipt) => receipt.receipt_number,
+      date: (receipt) => receipt.receipt_date ?? receipt.created_at ?? '',
+      client: (receipt) => clientNames.get(receipt.client_id ?? '') ?? '',
+      amount: (receipt) => toNumber(receipt.amount_received),
+      mode: (receipt) => modeLabel(receipt.payment_mode),
+      reference: (receipt) => receipt.reference_no ?? '',
+      status: (receipt) =>
+        receiptStatus(receipt, appliedByReceipt.get(receipt.id) ?? 0).label,
+    })
+  }, [appliedByReceipt, clientFilter, clientNames, modeFilter, query, receipts, sort])
+
+  const handleSort = (column: ReceiptSortKey) => {
+    const descendingFirst: ReceiptSortKey[] = ['date', 'amount']
+
+    setSort((current) =>
+      nextTableSort(current, column, descendingFirst.includes(column) ? 'desc' : 'asc')
+    )
+    setGroupByMonth(false)
+  }
 
   const receiptGroups = useMemo(
     () => groupReceiptsByMonth(filteredReceipts),
@@ -799,27 +834,29 @@ export function PaymentReceiptManager() {
               <caption className="sr-only">Payment receipts</caption>
               <thead className="bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
                 <tr>
-                  <th scope="col" className="px-4 py-3">
-                    Receipt
-                  </th>
-                  <th scope="col" className="px-4 py-3">
-                    Date
-                  </th>
-                  <th scope="col" className="px-4 py-3">
-                    Client
-                  </th>
-                  <th scope="col" className="px-4 py-3 text-right">
-                    Amount
-                  </th>
-                  <th scope="col" className="px-4 py-3">
-                    Mode
-                  </th>
-                  <th scope="col" className="px-4 py-3">
-                    Reference
-                  </th>
-                  <th scope="col" className="px-4 py-3">
-                    Status
-                  </th>
+                  <SortableHeader
+                    label="Receipt"
+                    column="number"
+                    sort={sort}
+                    onSort={handleSort}
+                  />
+                  <SortableHeader label="Date" column="date" sort={sort} onSort={handleSort} />
+                  <SortableHeader label="Client" column="client" sort={sort} onSort={handleSort} />
+                  <SortableHeader
+                    label="Amount"
+                    column="amount"
+                    sort={sort}
+                    onSort={handleSort}
+                    align="right"
+                  />
+                  <SortableHeader label="Mode" column="mode" sort={sort} onSort={handleSort} />
+                  <SortableHeader
+                    label="Reference"
+                    column="reference"
+                    sort={sort}
+                    onSort={handleSort}
+                  />
+                  <SortableHeader label="Status" column="status" sort={sort} onSort={handleSort} />
                   <th scope="col" className="px-4 py-3 text-right">
                     Actions
                   </th>

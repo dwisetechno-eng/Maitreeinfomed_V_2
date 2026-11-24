@@ -39,6 +39,7 @@ import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { IconButton } from '@/components/ui/icon-button'
 import { InboxIcon, PlusIcon, RefreshIcon, SpinnerIcon } from '@/components/ui/icons'
 import { Modal } from '@/components/ui/modal'
+import { SortableHeader } from '@/components/ui/sortable-header'
 import {
   getArticleQuantity,
   getArticleRate,
@@ -58,7 +59,17 @@ import {
 } from '@/lib/invoice-links'
 import { DEFAULT_TAX_RATE, extractMissingColumn, roundMoney } from '@/lib/proforma-invoices'
 import { isMissingColumnError } from '@/lib/supabase-errors'
+import { nextTableSort, sortTableRows, type TableSort } from '@/lib/table-sort'
 import { createClient } from '@/utils/supabase/client'
+
+type ProformaSortKey =
+  | 'number'
+  | 'date'
+  | 'client'
+  | 'status'
+  | 'subtotal'
+  | 'gst'
+  | 'total'
 
 type ClientOption = { id: string; company_name: string }
 type StatusOption = { status_code: string; status_label: string; display_order: number | null }
@@ -126,6 +137,10 @@ export function ProformaInvoicesManager() {
   const [departmentFilter, setDepartmentFilter] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
   const [grouped, setGrouped] = useState(true)
+  const [sort, setSort] = useState<TableSort<ProformaSortKey>>({
+    key: 'date',
+    direction: 'desc',
+  })
   const [collapsedClients, setCollapsedClients] = useState<Set<string>>(() => new Set())
   const [collapsedDepartments, setCollapsedDepartments] = useState<Set<string>>(() => new Set())
 
@@ -285,7 +300,7 @@ export function ProformaInvoicesManager() {
   const filteredInvoices = useMemo(() => {
     const term = query.trim().toLowerCase()
 
-    return invoices.filter((invoice) => {
+    const filtered = invoices.filter((invoice) => {
       if (clientFilter && invoice.client_id !== clientFilter) {
         return false
       }
@@ -312,6 +327,17 @@ export function ProformaInvoicesManager() {
         .toLowerCase()
         .includes(term)
     })
+
+    return sortTableRows(filtered, sort, {
+      number: (invoice) => invoice.pi_number?.trim() || invoice.id.slice(0, 8).toUpperCase(),
+      date: (invoice) => invoice.pi_date ?? invoice.invoice_date ?? invoice.created_at ?? '',
+      client: (invoice) => clientNames.get(invoice.client_id ?? '') ?? '',
+      status: (invoice) => invoice.status_code ?? '',
+      subtotal: (invoice) => toNumber(invoice.subtotal),
+      gst: (invoice) =>
+        invoice.tax_amount ?? Math.max(0, toNumber(invoice.grand_total) - toNumber(invoice.subtotal)),
+      total: (invoice) => toNumber(invoice.grand_total),
+    })
   }, [
     clientFilter,
     clientNames,
@@ -319,8 +345,18 @@ export function ProformaInvoicesManager() {
     departmentNames,
     invoices,
     query,
+    sort,
     statusFilter,
   ])
+
+  const handleSort = (column: ProformaSortKey) => {
+    const descendingFirst: ProformaSortKey[] = ['date', 'subtotal', 'gst', 'total']
+
+    setSort((current) =>
+      nextTableSort(current, column, descendingFirst.includes(column) ? 'desc' : 'asc')
+    )
+    setGrouped(false)
+  }
 
   const invoiceGroups = useMemo(
     () =>
@@ -1291,27 +1327,36 @@ export function ProformaInvoicesManager() {
               <caption className="sr-only">Proforma invoices</caption>
               <thead className="bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
                 <tr>
-                  <th scope="col" className="px-4 py-3">
-                    Invoice number
-                  </th>
-                  <th scope="col" className="px-4 py-3">
-                    PI date
-                  </th>
-                  <th scope="col" className="px-4 py-3">
-                    Client
-                  </th>
-                  <th scope="col" className="px-4 py-3">
-                    Status
-                  </th>
-                  <th scope="col" className="px-4 py-3 text-right">
-                    Subtotal
-                  </th>
-                  <th scope="col" className="px-4 py-3 text-right">
-                    GST
-                  </th>
-                  <th scope="col" className="px-4 py-3 text-right">
-                    Grand total
-                  </th>
+                  <SortableHeader
+                    label="Invoice number"
+                    column="number"
+                    sort={sort}
+                    onSort={handleSort}
+                  />
+                  <SortableHeader label="PI date" column="date" sort={sort} onSort={handleSort} />
+                  <SortableHeader label="Client" column="client" sort={sort} onSort={handleSort} />
+                  <SortableHeader label="Status" column="status" sort={sort} onSort={handleSort} />
+                  <SortableHeader
+                    label="Subtotal"
+                    column="subtotal"
+                    sort={sort}
+                    onSort={handleSort}
+                    align="right"
+                  />
+                  <SortableHeader
+                    label="GST"
+                    column="gst"
+                    sort={sort}
+                    onSort={handleSort}
+                    align="right"
+                  />
+                  <SortableHeader
+                    label="Grand total"
+                    column="total"
+                    sort={sort}
+                    onSort={handleSort}
+                    align="right"
+                  />
                   <th scope="col" className="px-4 py-3 text-right">
                     Actions
                   </th>

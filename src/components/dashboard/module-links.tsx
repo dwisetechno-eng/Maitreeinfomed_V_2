@@ -27,6 +27,7 @@ type ModuleStats = {
   articles: number
   proformas: number
   taxInvoices: number
+  receipts?: number
 }
 
 const MODULES: ModuleLink[] = [
@@ -82,6 +83,10 @@ export function ModuleLinks({ stats }: { stats?: ModuleStats }) {
 
     if (module.href === '/tax-invoices' && stats) {
       return `${stats.taxInvoices} tax invoice${stats.taxInvoices === 1 ? '' : 's'} on record`
+    }
+
+    if (module.href === '/payment-receipts' && stats?.receipts != null) {
+      return `${stats.receipts} receipt${stats.receipts === 1 ? '' : 's'} recorded`
     }
 
     return module.description

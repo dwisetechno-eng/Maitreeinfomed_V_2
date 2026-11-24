@@ -245,6 +245,7 @@ export function DashboardAnalytics() {
                 articles: kpis.pending + kpis.billed,
                 proformas: kpis.proformaCount,
                 taxInvoices: kpis.taxCount,
+                receipts: kpis.receiptCount,
               }
             : undefined
         }
