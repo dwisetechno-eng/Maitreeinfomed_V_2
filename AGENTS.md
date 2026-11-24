@@ -1,73 +1,63 @@
 # Maitree Infomed Medical Scientific Services
 
-Next.js 16 (App Router, Turbopack) + Supabase app for scientific article requests, proforma invoices, tax invoices and payment receipts. Single app, no monorepo, no test suite or lint config. `npm run build` runs the TypeScript check.
+Next.js 16 (App Router, Turbopack) + Supabase app for scientific article requests, proforma invoices, tax invoices and payment receipts. Single app, no monorepo. No ESLint/Prettier config is wired into scripts; `npm run build` is the production/type check path.
 
 ## Commands
 
 - `npm run dev` — dev server with Turbopack.
-- `npm run build` — production build; also the only typecheck wired into scripts.
-- `npx tsc --noEmit` — fast typecheck without building.
-- `npm run deploy` / `deploy.bat` — build, commit all changes, push `main`. Vercel deploys from `main`; pushing is the release step.
+- `npm run build` — production build; also the main typecheck wired into scripts.
+- `npx tsc --noEmit` — fast typecheck without building (useful on low-memory Windows hosts where `build` can OOM; Vercel does the real build).
+- `npm test` / `npm run test:watch` — Vitest (`jsdom`, `src/**/*.test.ts(x)`, `@` alias via `vitest.config.ts`).
+- `npm run deploy` / `deploy.bat` — build, `git add .`, commit, push `main`. Vercel deploys from `main`; pushing is the release step.
 
 ## Environment
 
-`.env.local` must define `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` (publishable/anon key, not service role). Without them `src/proxy.ts` redirects protected routes to `/login`. Routes are dynamic because auth reads cookies.
+`.env.local` must define `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` (publishable/anon key, not service role). Without them `src/proxy.ts` redirects protected routes to `/login`. Routes are dynamic because auth reads cookies. Never commit `.env.local`; `SUPABASE_SERVICE_ROLE_KEY` is server-only and required only for admin user create/delete (`src/actions/users.ts`, `scripts/create-admin.mjs`).
 
 ## Architecture
 
-- `src/proxy.ts` is the Next 16 replacement for `middleware.ts`; it refreshes the Supabase session cookie and gates the workspace prefixes. Do not add `middleware.ts`.
-- `src/app/<route>/page.tsx` are server components; the `*-manager.tsx` client components do the Supabase reads/writes. Server actions live in `src/actions/`.
-- Supabase clients: `src/utils/supabase/client.ts` (browser) and `server.ts` (server actions/pages).
-- `src/lib/invoice-links.ts` owns the foreign-key links between article requests, proformas, tax invoices and receipts plus the aggregate totals/status recalculation. Reuse its helpers instead of rewriting invoice math.
-- Article status is derived from links, not stored: on a PAID tax invoice → `COMPLETED`, on any invoice → `PI_GENERATED`, otherwise keep `status_code`. Use `deriveArticleStatus`.
-- Reversal order matters: remove a proforma from its tax invoice before editing/deleting the proforma; remove receipt allocations (or delete the receipt) to recalculate invoices.
-- Invoice numbering lives in `src/lib/proforma-invoices.ts` and `src/lib/tax-invoices.ts` (`PI-YYYYMM-NNNN`, `TI-YYYYMM-NNNN`); use those helpers.
+- `src/proxy.ts` is the Next 16 replacement for `middleware.ts`; it refreshes the Supabase session cookie and gates protected prefixes. Do not add `middleware.ts`.
+- `src/app/<route>/page.tsx` are server components; `*-manager.tsx` client components do most Supabase reads/writes. Server actions live in `src/actions/`.
+- Supabase clients: `src/utils/supabase/client.ts` (browser) and `src/utils/supabase/server.ts` (server actions/pages).
+- `src/lib/invoice-links.ts` owns FK links between article requests, proformas, tax invoices and receipts plus aggregate totals/status recalculation. Reuse its helpers instead of rewriting invoice math.
+- Article status is derived, not stored: PAID tax invoice → `COMPLETED`; any linked invoice → `PI_GENERATED`; otherwise keep `status_code`. Use `deriveArticleStatus`.
+- Reversal order matters: remove a proforma from its tax invoice before editing/deleting the proforma; remove receipt allocations (or delete the receipt) before recalculating invoices.
+- Invoice numbering: `src/lib/proforma-invoices.ts` and `src/lib/tax-invoices.ts` (`PI-YYYYMM-NNNN`, `TI-YYYYMM-NNNN`).
 
 ## Invoice documents
 
-- Proforma invoices and tax invoices both download as Word (`.docx`) from the shared renderer in `src/lib/invoice-docx.ts` (`docx`), driven by the shared model in `src/lib/invoice-documents.ts`. The proforma template uses a blue theme and the tax template the brand green, so the two are distinguishable at a glance.
-- The Maitree Infomed brand mark is `src/components/brand/brand-mark.tsx` (SVG used by the sidebar, login/reset screens and `src/app/icon.svg`). The Word letterhead embeds the generated PNG in `src/lib/maitree-logo.ts`; do not add other image assets, and regenerate that file if the SVG changes.
-- `src/actions/invoice-documents.ts` fetches the invoice, client, linked articles and proformas, renders the file and returns base64; the managers trigger the browser download.
-- Seller details, buyer USV address/GSTIN and service defaults are hardcoded in `src/lib/invoice-documents.ts`; `clients.location`/`gstin` override the buyer values. Tax invoices store `po_number`/`po_date` on `tax_invoices` and those override the template PO defaults. Optional JSON in `document_content` overrides attention, service text and dates.
-- Line items are one row per linked article request at SAC `998393`; an adjustment line reconciles the line total to the stored subtotal.
+- Proforma/tax invoices download as Word (`.docx`) via shared renderer `src/lib/invoice-docx.ts` and model `src/lib/invoice-documents.ts` (blue proforma, green tax theme).
+- Brand mark: `src/components/brand/brand-mark.tsx` (SVG in UI/icon). Word letterhead embeds generated PNG in `src/lib/maitree-logo.ts`; do not add image assets, regenerate that file if the SVG changes.
+- `src/actions/invoice-documents.ts` fetches data, renders, returns base64; managers trigger browser download.
+- Seller/buyer/service defaults are hardcoded in `src/lib/invoice-documents.ts`; `clients.location`/`gstin` override buyer. Tax invoices use `tax_invoices.po_number`/`po_date`; optional JSON in `document_content` overrides attention/service/dates.
+- Line items: one row per linked article request at SAC `998393`; an adjustment line reconciles line total to stored subtotal.
 
 ## Supabase schema
 
-- Schema changes are additive SQL files in `supabase/migrations/`; there is no `supabase/config.toml`, so apply them in the Supabase SQL editor or with `supabase db push`.
-- Migrations enable RLS and grant `anon, authenticated` access; the app still writes with the publishable key. Keep policies in mind when adding tables.
+- Schema changes are additive SQL files in `supabase/migrations/`; there is no `supabase/config.toml`. Apply via Supabase SQL editor or `supabase db push`.
+- RLS is enabled; policies matter. Masters writes are restricted by `can_manage_masters()` (admin/manager). `profiles` admin checks use `is_admin()` SECURITY DEFINER to avoid recursion.
 - `supabase/diagnostics/auth-signup-diagnostics.sql` is a manual diagnostic, not a migration.
 
 ## Excel import/export
 
-- ExcelJS runs server-side only; `next.config.ts` pins it in `serverExternalPackages` and raises the server-action body limit to 8 MB.
-- Import parsing, the downloadable template and the filtered-list export are in `src/actions/import-articles.ts`; the import dialog is `src/components/article-requests/batch-import-dialog.tsx`.
-- Header matching is case-insensitive and alias-based (`HEADER_ALIASES`); unknown vendors are auto-created. The template workbook's first sheet is the one imported.
+- ExcelJS runs server-side only; `next.config.ts` pins it in `serverExternalPackages` and raises server-action body limit to 8 MB.
+- Import parsing, template download, and filtered export: `src/actions/import-articles.ts`; dialog: `src/components/article-requests/batch-import-dialog.tsx`.
+- Header matching is case-insensitive/alias-based (`HEADER_ALIASES`); unknown vendors are auto-created; first sheet is imported.
 - ExcelJS `writeBuffer()` is typed loosely: use `Buffer.from(buffer as ArrayBuffer)`.
 
 ## UI conventions
 
-- Row/header actions use `src/components/ui/icon-button.tsx` (icon only, tooltip label, disabled reason in tooltip).
+- Row/header actions use `src/components/ui/icon-button.tsx` (icon-only, tooltip label, disabled reason in tooltip).
 - List screens deep-link via query params: article requests accept `status`, `client`, `department`, `billing`, `from`, `to`; proforma and tax invoices accept `status`. Dashboard KPI/pipeline links rely on these.
-- User management and role-based access: `src/app/masters/users` + `src/components/masters/user-manager.tsx` manage `profiles` (admin only). Roles are `admin`/`manager`/`user`, stored in `profiles.role` and mirrored into `app_metadata.role`. Creating/deleting auth accounts requires `SUPABASE_SERVICE_ROLE_KEY` on the server; without it the panel degrades to profile-only edits. Migration `20261108150000_profiles_rbac.sql` creates the table, RLS and the signup trigger.
-- Dashboard analytics re-fetches silently on window focus / visibility change so reversals from another route appear without a manual refresh.
+- `/masters` has no index page; masters are individual routes under `src/app/masters/*` and nav links in `src/components/layout/app-shell.tsx`.
+- User management: `src/app/masters/users` + `src/components/masters/user-manager.tsx`, admin-only. Roles `admin`/`manager`/`user` live in `profiles.role` and mirror to `app_metadata.role`. Without `SUPABASE_SERVICE_ROLE_KEY`, admin user create/delete degrades to profile-only edits.
+- Dashboard analytics silently re-fetches on window focus/visibility so reversals from other routes appear without manual refresh.
 
-## Verification
+## Verification, testing, security
 
-- Production: `https://sci-article-hub.vercel.app` (deploys on push to `main`). No CI checks; verify the deployed UI manually.
-- On low-memory Windows hosts `npm run build` can OOM; `npx tsc --noEmit` still works and Vercel performs the real build.
-
-## Testing
-
-- `npm test` runs Vitest unit tests (`src/**/*.test.ts(x)`).
-- Tests live next to the code they cover (e.g. `src/lib/roles.test.ts`).
-- Pure logic (roles, invoice math, status derivation) is covered; DB/UI are not unit-tested. Add Playwright/Cypress for E2E if needed.
-
-## Security
-
-- See `SECURITY.md` for the full checklist.
-- RLS policies: `supabase/migrations/20261108170000_security_hardening_rls.sql`.
-- Security headers: `next.config.ts`.
-- Never commit `.env.local`; service role key is server-only.
+- Production: `https://sci-article-hub.vercel.app` (deploys on push to `main`). No CI checks; verify deployed UI manually.
+- Tests: `npm test` runs Vitest unit tests next to code (`src/**/*.test.ts(x)`). Pure logic is covered; DB/UI are not unit-tested.
+- Security: see `SECURITY.md`. Security headers in `next.config.ts`; RLS hardening in `supabase/migrations/20261108170000_security_hardening_rls.sql`. Never commit secrets.
 
 <!-- BEGIN:nextjs-agent-rules -->
 

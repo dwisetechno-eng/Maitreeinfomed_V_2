@@ -7,8 +7,9 @@
  */
 
 import type { ArticleRequestRow } from '@/lib/article-request-meta'
-import { buildInvoiceDocumentData } from '@/lib/invoice-documents'
+import { buildInvoiceDocumentData, type InvoiceClientInfo } from '@/lib/invoice-documents'
 import { renderInvoiceDocx } from '@/lib/invoice-docx'
+import { renderTaxInvoiceProofPdf } from '@/lib/invoice-proof-pdf'
 import { isMissingColumnError } from '@/lib/supabase-errors'
 import { createClient } from '@/utils/supabase/server'
 
@@ -197,6 +198,33 @@ function firstValue(
   return null
 }
 
+function resolveInvoiceDocumentContent(invoice: {
+  document_content?: string | null
+  notes?: string | null
+}): {
+  documentContent: string | null
+  notes: string | null
+} {
+  const raw = invoice.document_content?.trim() ?? ''
+
+  if (!raw.startsWith('{')) {
+    return { documentContent: invoice.document_content ?? null, notes: invoice.notes ?? null }
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>
+
+    // Keep legacy proforma-link payloads working; they are not document overrides.
+    if (Array.isArray(parsed.proforma_invoice_ids) || parsed.source === 'PROFORMA') {
+      return { documentContent: null, notes: invoice.notes ?? null }
+    }
+
+    return { documentContent: raw, notes: null }
+  } catch {
+    return { documentContent: invoice.document_content ?? null, notes: invoice.notes ?? null }
+  }
+}
+
 /** Render a proforma invoice as a Word document. */
 export async function downloadProformaDocument(
   invoiceId: string
@@ -246,6 +274,7 @@ export async function downloadProformaDocument(
     const storedTax = Number(invoice.tax_amount ?? 0) || Number(invoice.tax_total ?? 0)
     const taxAmount =
       storedTax || Math.max(0, Number(invoice.grand_total ?? 0) - subtotal)
+    const { documentContent, notes } = resolveInvoiceDocumentContent(invoice)
 
     const data = buildInvoiceDocumentData({
       kind: 'PROFORMA',
@@ -260,7 +289,8 @@ export async function downloadProformaDocument(
       taxAmount,
       taxRate: Number(invoice.tax_rate ?? 0),
       grandTotal: Number(invoice.grand_total ?? 0),
-      documentContent: invoice.document_content,
+      documentContent,
+      notes,
     })
 
     const buffer = await renderInvoiceDocx(data)
@@ -362,6 +392,8 @@ export async function downloadTaxInvoiceDocument(
       fetchContactName(firstValue(articles, 'contact_id')),
     ])
 
+    const { documentContent, notes } = resolveInvoiceDocumentContent(invoice)
+
     const data = buildInvoiceDocumentData({
       kind: 'TAX',
       invoiceNumber:
@@ -384,11 +416,11 @@ export async function downloadTaxInvoiceDocument(
           ? (Number(invoice.tax_total ?? 0) / Number(invoice.subtotal ?? 1)) * 100
           : 0,
       grandTotal: Number(invoice.grand_total ?? 0),
-      documentContent: invoice.document_content,
+      documentContent,
       linkedProformaNumbers: proformas.map((proforma) => proforma.pi_number),
       buyerOrderNo: invoice.po_number,
       buyerOrderDate: invoice.po_date,
-      notes: invoice.notes,
+      notes,
     })
 
     const buffer = await renderInvoiceDocx(data)
@@ -408,5 +440,92 @@ export async function downloadTaxInvoiceDocument(
       ok: false,
       error: errorMessage(error, 'Could not generate the tax invoice document.'),
     }
+  }
+}
+
+/** Render a tax invoice proof as a PDF (Sr No + Description only). */
+export async function downloadTaxInvoiceProofDocument(
+  invoiceId: string
+): Promise<InvoiceDocumentResult> {
+  try {
+    if (!invoiceId?.trim()) {
+      return { ok: false, error: 'Choose a tax invoice to download.' }
+    }
+
+    const supabase = await createClient()
+    const { data: invoiceData, error: invoiceError } = await supabase
+      .from('tax_invoices')
+      .select(
+        'id, tax_invoice_number, invoice_date, client_id, subtotal, tax_total, grand_total, status_code, po_number, po_date, notes, document_content, created_at'
+      )
+      .eq('id', invoiceId)
+      .single()
+
+    if (invoiceError) {
+      throw invoiceError
+    }
+
+    const invoice = invoiceData as TaxInvoiceRow
+
+    const [{ data: client, error: clientError }, articlesResult, proformaResult] =
+      await Promise.all([
+        invoice.client_id
+          ? supabase
+              .from('clients')
+              .select('company_name, location, address, city, state, gstin, email, phone')
+              .eq('id', invoice.client_id)
+              .maybeSingle()
+          : Promise.resolve({ data: null, error: null }),
+        supabase.from('article_requests').select('*').eq('tax_invoice_id', invoice.id).order('created_at', { ascending: true }),
+        supabase.from('proforma_invoices').select('id, pi_number').eq('tax_invoice_id', invoice.id).order('pi_date', { ascending: true }),
+      ])
+
+    if (clientError) throw clientError
+    if (articlesResult.error) throw articlesResult.error
+    if (proformaResult.error) throw proformaResult.error
+
+    const proformas = (proformaResult.data ?? []) as ProformaLinkRow[]
+    let articles = (articlesResult.data ?? []) as ArticleRequestRow[]
+    if (articles.length === 0 && proformas.length > 0) {
+      const { data: fallbackArticles, error: fallbackError } = await supabase
+        .from('article_requests')
+        .select('*')
+        .in('proforma_invoice_id', proformas.map((p) => p.id))
+        .order('created_at', { ascending: true })
+      if (fallbackError) throw fallbackError
+      articles = (fallbackArticles ?? []) as ArticleRequestRow[]
+    }
+
+    const [departmentName, contactName] = await Promise.all([
+      fetchDepartmentName(firstValue(articles, 'department_id')),
+      fetchContactName(firstValue(articles, 'contact_id')),
+    ])
+
+    const { documentContent, notes } = resolveInvoiceDocumentContent(invoice)
+    const data = buildInvoiceDocumentData({
+      kind: 'TAX',
+      invoiceNumber: invoice.tax_invoice_number ?? invoice.id.slice(0, 8).toUpperCase(),
+      invoiceDate: invoice.invoice_date,
+      createdAt: invoice.created_at,
+      client: client as InvoiceClientInfo | null,
+      departmentName,
+      contactName,
+      articles,
+      subtotal: Number(invoice.subtotal ?? 0),
+      taxAmount: Number(invoice.tax_total ?? 0) || Math.max(0, Number(invoice.grand_total ?? 0) - Number(invoice.subtotal ?? 0)),
+      taxRate: Number(invoice.subtotal ?? 0) > 0 ? (Number(invoice.tax_total ?? 0) / Number(invoice.subtotal ?? 1)) * 100 : 0,
+      grandTotal: Number(invoice.grand_total ?? 0),
+      documentContent,
+      linkedProformaNumbers: proformas.map((p) => p.pi_number),
+      buyerOrderNo: invoice.po_number,
+      buyerOrderDate: invoice.po_date,
+      notes,
+    })
+
+    const buffer = await renderTaxInvoiceProofPdf(data)
+    const filename = `PROOF-${safeFilenamePart(data.invoiceNumber, invoice.id.slice(0, 8))}.pdf`
+    return { ok: true, base64: buffer.toString('base64'), filename, mimeType: 'application/pdf' }
+  } catch (error) {
+    return { ok: false, error: errorMessage(error, 'Could not generate the tax invoice proof document.') }
   }
 }

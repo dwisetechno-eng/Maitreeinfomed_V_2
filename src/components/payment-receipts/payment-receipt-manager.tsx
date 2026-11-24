@@ -1074,8 +1074,13 @@ function SummaryCard({
   hint: string
   tone?: 'default' | 'amber'
 }) {
+  const toneClass =
+    tone === 'amber'
+      ? 'border-amber-100 bg-amber-50/40'
+      : 'border-emerald-100 bg-emerald-50/35'
+
   return (
-    <div className={`${cardClass} px-4 py-4`}>
+    <div className={`rounded-2xl border px-4 py-4 shadow-sm ${toneClass}`}>
       <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</p>
       <p
         className={`mt-1 text-2xl font-semibold tabular-nums ${

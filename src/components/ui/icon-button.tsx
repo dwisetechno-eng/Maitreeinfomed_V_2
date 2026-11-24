@@ -25,11 +25,13 @@ type IconButtonProps = Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'children' 
 
 const VARIANT_CLASSES: Record<Variant, string> = {
   primary:
-    'bg-brand-600 text-white shadow-sm hover:bg-brand-700 focus-visible:ring-brand-500 focus-visible:ring-offset-2',
+    'border border-brand-200 bg-brand-50 text-brand-700 shadow-sm hover:bg-brand-100 hover:border-brand-300 focus-visible:ring-brand-500 focus-visible:ring-offset-2',
   secondary:
-    'border border-slate-200 bg-white text-slate-700 shadow-sm hover:bg-slate-50 hover:text-slate-900 focus-visible:ring-brand-500 focus-visible:ring-offset-2',
-  ghost: 'text-slate-600 hover:bg-slate-100 hover:text-slate-900 focus-visible:ring-brand-500',
-  danger: 'text-red-600 hover:bg-red-50 hover:text-red-700 focus-visible:ring-red-500',
+    'border border-slate-200 bg-slate-50 text-slate-700 shadow-sm hover:bg-slate-100 hover:text-slate-900 focus-visible:ring-brand-500 focus-visible:ring-offset-2',
+  ghost:
+    'border border-transparent bg-slate-50/70 text-slate-600 hover:border-slate-200 hover:bg-slate-100 hover:text-slate-900 focus-visible:ring-brand-500',
+  danger:
+    'border border-red-200 bg-red-50 text-red-700 shadow-sm hover:bg-red-100 hover:border-red-300 focus-visible:ring-red-500 focus-visible:ring-offset-2',
 }
 
 const SIZE_CLASSES: Record<Size, string> = {
