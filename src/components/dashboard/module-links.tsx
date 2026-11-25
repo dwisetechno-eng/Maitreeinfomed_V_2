@@ -33,28 +33,28 @@ type ModuleStats = {
 const MODULES: ModuleLink[] = [
   {
     title: 'Article Requests',
-    href: '/article-requests',
+    href: '/dashboard/article-requests',
     description: 'Capture, import and group incoming requests',
     icon: FileText,
     tone: 'bg-brand-50 text-brand-700',
   },
   {
     title: 'Proforma Invoices',
-    href: '/proforma-invoices',
+    href: '/dashboard/proforma-invoices',
     description: 'Group unbilled requests and send a PI',
     icon: FileSpreadsheet,
     tone: 'bg-indigo-50 text-indigo-700',
   },
   {
     title: 'Tax Invoices',
-    href: '/tax-invoices',
+    href: '/dashboard/tax-invoices',
     description: 'Convert proformas into tax invoices',
     icon: ReceiptText,
     tone: 'bg-sky-50 text-sky-700',
   },
   {
     title: 'Payment Receipts',
-    href: '/payment-receipts',
+    href: '/dashboard/payment-receipts',
     description: 'Record receipts and allocate payments',
     icon: Wallet,
     tone: 'bg-emerald-50 text-emerald-700',
@@ -73,19 +73,19 @@ const MASTERS: Array<{ label: string; href: string; icon: LucideIcon }> = [
 
 export function ModuleLinks({ stats }: { stats?: ModuleStats }) {
   function descriptionFor(module: ModuleLink) {
-    if (module.href === '/article-requests' && stats) {
+    if (module.href === '/dashboard/article-requests' && stats) {
       return `${stats.articles} request${stats.articles === 1 ? '' : 's'} tracked`
     }
 
-    if (module.href === '/proforma-invoices' && stats) {
+    if (module.href === '/dashboard/proforma-invoices' && stats) {
       return `${stats.proformas} proforma${stats.proformas === 1 ? '' : 's'} raised`
     }
 
-    if (module.href === '/tax-invoices' && stats) {
+    if (module.href === '/dashboard/tax-invoices' && stats) {
       return `${stats.taxInvoices} tax invoice${stats.taxInvoices === 1 ? '' : 's'} on record`
     }
 
-    if (module.href === '/payment-receipts' && stats?.receipts != null) {
+    if (module.href === '/dashboard/payment-receipts' && stats?.receipts != null) {
       return `${stats.receipts} receipt${stats.receipts === 1 ? '' : 's'} recorded`
     }
 

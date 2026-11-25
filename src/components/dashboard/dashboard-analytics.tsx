@@ -1,200 +1,20 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useMemo } from 'react'
 
-import { ArticleTimeline } from '@/components/dashboard/article-timeline'
-import { InvoicePipeline } from '@/components/dashboard/invoice-pipeline'
 import { InvoiceTimeline } from '@/components/dashboard/invoice-timeline'
-import { KpiCards, KpiCardsSkeleton } from '@/components/dashboard/kpi-cards'
 import { ModuleLinks } from '@/components/dashboard/module-links'
-import { StatusBreakdown } from '@/components/dashboard/status-breakdown'
-import {
-  SUPABASE_SETUP_MESSAGE,
-  getErrorMessage,
-  hasSupabaseEnv,
-  secondaryButtonClass,
-} from '@/components/masters/utils'
 import { Alert } from '@/components/ui/alert'
 import { RefreshIcon, SpinnerIcon } from '@/components/ui/icons'
 import {
-  invoiceValue,
-  toNumber,
-  type DashboardArticle,
-  type DashboardReceipt,
-  type InvoiceRow,
-  type NamedOption,
-  type StatusMasterRow,
-} from '@/lib/dashboard'
-import { createClient } from '@/utils/supabase/client'
-
-type DashboardSnapshot = {
-  proforma: InvoiceRow[]
-  tax: InvoiceRow[]
-  receipts: DashboardReceipt[]
-  articles: DashboardArticle[]
-  statuses: StatusMasterRow[]
-  departments: NamedOption[]
-  clients: NamedOption[]
-}
+  SUPABASE_SETUP_MESSAGE,
+  secondaryButtonClass,
+} from '@/components/masters/utils'
+import { calculateKpis, useDashboardSnapshot } from '@/hooks/use-dashboard-snapshot'
 
 export function DashboardAnalytics() {
-  const [snapshot, setSnapshot] = useState<DashboardSnapshot | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  const [lastUpdated, setLastUpdated] = useState<Date | null>(null)
-
-  const loadData = useCallback(async (options?: { silent?: boolean }) => {
-    const silent = options?.silent === true
-
-    if (!silent) {
-      setLoading(true)
-    }
-
-    setError(null)
-
-    if (!hasSupabaseEnv()) {
-      setError(SUPABASE_SETUP_MESSAGE)
-      if (!silent) {
-        setLoading(false)
-      }
-      return
-    }
-
-    try {
-      const supabase = createClient()
-
-      const [
-        proformaResult,
-        taxResult,
-        receiptsResult,
-        articlesResult,
-        statusesResult,
-        departmentsResult,
-        clientsResult,
-      ] = await Promise.all([
-        supabase.from('proforma_invoices').select('*'),
-        supabase.from('tax_invoices').select('*'),
-        supabase
-          .from('payment_receipts')
-          .select('id, receipt_date, amount_received, created_at'),
-        supabase
-          .from('article_requests')
-          .select(
-            'id, client_id, department_id, status_code, request_date, created_at, proforma_invoice_id, tax_invoice_id'
-          ),
-        supabase
-          .from('article_status_master')
-          .select('status_code, status_label, display_order, description')
-          .order('display_order', { ascending: true })
-          .order('status_code', { ascending: true }),
-        supabase.from('departments').select('id, department_name').order('department_name'),
-        supabase.from('clients').select('id, company_name').order('company_name'),
-      ])
-
-      const firstError =
-        proformaResult.error ??
-        taxResult.error ??
-        receiptsResult.error ??
-        articlesResult.error ??
-        statusesResult.error ??
-        departmentsResult.error ??
-        clientsResult.error
-
-      if (firstError) {
-        throw firstError
-      }
-
-      setSnapshot({
-        proforma: (proformaResult.data ?? []) as InvoiceRow[],
-        tax: (taxResult.data ?? []) as InvoiceRow[],
-        receipts: (receiptsResult.data ?? []) as DashboardReceipt[],
-        articles: (articlesResult.data ?? []) as DashboardArticle[],
-        statuses: (statusesResult.data ?? []) as StatusMasterRow[],
-        departments: ((departmentsResult.data ?? []) as { id: string; department_name: string }[]).map(
-          (department) => ({ id: department.id, name: department.department_name })
-        ),
-        clients: ((clientsResult.data ?? []) as { id: string; company_name: string }[]).map(
-          (client) => ({ id: client.id, name: client.company_name })
-        ),
-      })
-      setLastUpdated(new Date())
-    } catch (loadError) {
-      setError(getErrorMessage(loadError, 'Unable to load dashboard analytics.'))
-    } finally {
-      if (!silent) {
-        setLoading(false)
-      }
-    }
-  }, [])
-
-  useEffect(() => {
-    void loadData()
-  }, [loadData])
-
-  // Re-fetch quietly when the window regains focus or the tab becomes visible
-  // again, so reversals made on another route show up without a manual refresh.
-  useEffect(() => {
-    function refreshIfVisible() {
-      if (document.visibilityState !== 'visible') {
-        return
-      }
-
-      void loadData({ silent: true })
-    }
-
-    window.addEventListener('focus', refreshIfVisible)
-    document.addEventListener('visibilitychange', refreshIfVisible)
-
-    return () => {
-      window.removeEventListener('focus', refreshIfVisible)
-      document.removeEventListener('visibilitychange', refreshIfVisible)
-    }
-  }, [loadData])
-
-  const kpis = useMemo(() => {
-    if (!snapshot) {
-      return null
-    }
-
-    const proformaValue = snapshot.proforma.reduce(
-      (total, invoice) => total + invoiceValue(invoice),
-      0
-    )
-    const taxValue = snapshot.tax.reduce((total, invoice) => total + invoiceValue(invoice), 0)
-    const receiptValue = snapshot.receipts.reduce(
-      (total, receipt) => total + toNumber(receipt.amount_received),
-      0
-    )
-    const outstandingValue = Math.max(0, taxValue - receiptValue)
-
-    let pending = 0
-    let onProforma = 0
-    let taxInvoiced = 0
-
-    for (const article of snapshot.articles) {
-      if (article.tax_invoice_id) {
-        taxInvoiced += 1
-      } else if (article.proforma_invoice_id) {
-        onProforma += 1
-      } else {
-        pending += 1
-      }
-    }
-
-    return {
-      proformaValue,
-      proformaCount: snapshot.proforma.length,
-      taxValue,
-      taxCount: snapshot.tax.length,
-      receiptValue,
-      receiptCount: snapshot.receipts.length,
-      outstandingValue,
-      pending,
-      onProforma,
-      taxInvoiced,
-      billed: onProforma + taxInvoiced,
-    }
-  }, [snapshot])
+  const { snapshot, loading, error, lastUpdated, reload } = useDashboardSnapshot()
+  const kpis = useMemo(() => (snapshot ? calculateKpis(snapshot) : null), [snapshot])
 
   return (
     <div className="space-y-5">
@@ -222,7 +42,7 @@ export function DashboardAnalytics() {
           )}
           <button
             type="button"
-            onClick={() => void loadData()}
+            onClick={reload}
             disabled={loading}
             className={`${secondaryButtonClass} px-2.5 py-1.5`}
           >
@@ -233,7 +53,7 @@ export function DashboardAnalytics() {
       </div>
 
       {error && (
-        <Alert tone="error" onDismiss={() => setError(null)}>
+        <Alert tone="error">
           {error}
         </Alert>
       )}
@@ -252,27 +72,16 @@ export function DashboardAnalytics() {
       />
 
       {!snapshot && loading ? (
-        <>
-          <KpiCardsSkeleton />
-          <div className="grid gap-4 xl:grid-cols-2">
-            <PanelSkeleton />
-            <PanelSkeleton />
-          </div>
-          <PanelSkeleton />
-          <div className="grid gap-4 xl:grid-cols-5">
-            <PanelSkeleton className="xl:col-span-3" />
-            <PanelSkeleton className="xl:col-span-2" />
-          </div>
-        </>
+        <PanelSkeleton />
       ) : !snapshot ? (
         <div className="rounded-2xl border border-slate-200 bg-white px-6 py-14 text-center shadow-sm">
           <p className="text-sm font-semibold text-slate-900">Could not load the dashboard</p>
           <p className="mx-auto mt-1 max-w-lg text-sm text-slate-500">
-            {error ?? 'Check the Supabase connection and try again.'}
+            {error ?? SUPABASE_SETUP_MESSAGE}
           </p>
           <button
             type="button"
-            onClick={() => void loadData()}
+            onClick={reload}
             disabled={loading}
             className={`${secondaryButtonClass} mt-4`}
           >
@@ -281,44 +90,11 @@ export function DashboardAnalytics() {
           </button>
         </div>
       ) : (
-        <>
-          {kpis && (
-            <KpiCards
-              proformaValue={kpis.proformaValue}
-              proformaCount={kpis.proformaCount}
-              taxValue={kpis.taxValue}
-              taxCount={kpis.taxCount}
-              receiptValue={kpis.receiptValue}
-              receiptCount={kpis.receiptCount}
-              outstandingValue={kpis.outstandingValue}
-              pendingCount={kpis.pending}
-              billedCount={kpis.billed}
-              onProformaCount={kpis.onProforma}
-              taxInvoicedCount={kpis.taxInvoiced}
-            />
-          )}
-
-          <InvoicePipeline proforma={snapshot.proforma} tax={snapshot.tax} />
-
-          <InvoiceTimeline
-            proforma={snapshot.proforma}
-            tax={snapshot.tax}
-            receipts={snapshot.receipts}
-          />
-
-          <div className="grid gap-4 xl:grid-cols-5">
-            <div className="xl:col-span-3">
-              <ArticleTimeline
-                articles={snapshot.articles}
-                departments={snapshot.departments}
-                clients={snapshot.clients}
-              />
-            </div>
-            <div className="xl:col-span-2">
-              <StatusBreakdown articles={snapshot.articles} statuses={snapshot.statuses} />
-            </div>
-          </div>
-        </>
+        <InvoiceTimeline
+          proforma={snapshot.proforma}
+          tax={snapshot.tax}
+          receipts={snapshot.receipts}
+        />
       )}
     </div>
   )

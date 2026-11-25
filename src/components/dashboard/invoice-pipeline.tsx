@@ -2,14 +2,13 @@
 
 import { useMemo } from 'react'
 import Link from 'next/link'
-import { ArrowUpRight } from 'lucide-react'
-
-import { InboxIcon } from '@/components/ui/icons'
+import { ExternalLinkIcon, InboxIcon } from '@/components/ui/icons'
 import { formatCurrency, invoiceValue, toNumber, type InvoiceRow } from '@/lib/dashboard'
 
 type InvoicePipelineProps = {
   proforma: InvoiceRow[]
   tax: InvoiceRow[]
+  only?: 'proforma' | 'tax'
 }
 
 type StageConfig = {
@@ -97,12 +96,14 @@ const UNASSIGNED_STAGE: StageConfig = {
   bar: '#cbd5e1',
 }
 
-export function InvoicePipeline({ proforma, tax }: InvoicePipelineProps) {
+export function InvoicePipeline({ proforma, tax, only }: InvoicePipelineProps) {
   const proformaStats = useMemo(
     () => buildPipeline(proforma, PROFORMA_STAGES),
     [proforma]
   )
   const taxStats = useMemo(() => buildTaxPipeline(tax), [tax])
+  const showProforma = only !== 'tax'
+  const showTax = only !== 'proforma'
 
   return (
     <section aria-labelledby="invoice-pipeline-heading" className="space-y-3">
@@ -115,60 +116,67 @@ export function InvoicePipeline({ proforma, tax }: InvoicePipelineProps) {
             Invoice pipeline
           </h2>
           <p className="mt-1 text-sm text-slate-600">
-            Where proforma invoices are waiting and how much of the tax invoicing has been
-            collected.
+            {only === 'proforma'
+              ? 'Where proforma invoices are waiting for conversion to a tax invoice.'
+              : only === 'tax'
+                ? 'What has been billed, collected and is still outstanding.'
+                : 'Where proforma invoices are waiting and how much of the tax invoicing has been collected.'}
           </p>
         </div>
       </div>
 
-      <div className="grid gap-4 xl:grid-cols-2">
-        <PipelineCard
-          href="/proforma-invoices"
-          title="Proforma invoices"
-          subtitle="Open vs converted to tax invoice"
-          stats={proformaStats.stages}
-          emptyLabel="No proforma invoices have been raised yet."
-          headline={{
-            label: 'Open pipeline',
-            value: proformaStats.openValue,
-            hint: `${proformaStats.openCount} of ${proformaStats.totalCount} still awaiting conversion`,
-          }}
-          secondary={{
-            label: 'Converted',
-            value: proformaStats.convertedValue,
-            hint: `${proformaStats.convertedCount} proforma${
-              proformaStats.convertedCount === 1 ? '' : 's'
-            } moved to a tax invoice`,
-          }}
-        />
+      <div className={`grid gap-4 ${showProforma && showTax ? 'xl:grid-cols-2' : ''}`}>
+        {showProforma && (
+          <PipelineCard
+            href="/proforma-invoices"
+            title="Proforma invoices"
+            subtitle="Open vs converted to tax invoice"
+            stats={proformaStats.stages}
+            emptyLabel="No proforma invoices have been raised yet."
+            headline={{
+              label: 'Open pipeline',
+              value: proformaStats.openValue,
+              hint: `${proformaStats.openCount} of ${proformaStats.totalCount} still awaiting conversion`,
+            }}
+            secondary={{
+              label: 'Converted',
+              value: proformaStats.convertedValue,
+              hint: `${proformaStats.convertedCount} proforma${
+                proformaStats.convertedCount === 1 ? '' : 's'
+              } moved to a tax invoice`,
+            }}
+          />
+        )}
 
-        <PipelineCard
-          href="/tax-invoices"
-          title="Tax invoices"
-          subtitle="Billed, collected and outstanding"
-          stats={taxStats.stages}
-          emptyLabel="No tax invoices have been raised yet."
-          headline={{
-            label: 'Billed',
-            value: taxStats.billedValue,
-            hint: `${taxStats.totalCount} tax invoice${
-              taxStats.totalCount === 1 ? '' : 's'
-            } on record`,
-          }}
-          secondary={{
-            label: 'Outstanding',
-            value: taxStats.outstanding,
-            hint: `${formatCurrency(taxStats.collected)} collected so far`,
-          }}
-          progress={
-            taxStats.billedValue > 0
-              ? {
-                  label: 'Collected',
-                  percent: (taxStats.collected / taxStats.billedValue) * 100,
-                }
-              : null
-          }
-        />
+        {showTax && (
+          <PipelineCard
+            href="/tax-invoices"
+            title="Tax invoices"
+            subtitle="Billed, collected and outstanding"
+            stats={taxStats.stages}
+            emptyLabel="No tax invoices have been raised yet."
+            headline={{
+              label: 'Billed',
+              value: taxStats.billedValue,
+              hint: `${taxStats.totalCount} tax invoice${
+                taxStats.totalCount === 1 ? '' : 's'
+              } on record`,
+            }}
+            secondary={{
+              label: 'Outstanding',
+              value: taxStats.outstanding,
+              hint: `${formatCurrency(taxStats.collected)} collected so far`,
+            }}
+            progress={
+              taxStats.billedValue > 0
+                ? {
+                    label: 'Collected',
+                    percent: (taxStats.collected / taxStats.billedValue) * 100,
+                  }
+                : null
+            }
+          />
+        )}
       </div>
     </section>
   )
@@ -208,7 +216,7 @@ function PipelineCard({
           className="inline-flex shrink-0 items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium text-brand-700 transition hover:bg-brand-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
         >
           Open
-          <ArrowUpRight className="h-3.5 w-3.5" />
+          <ExternalLinkIcon className="h-3.5 w-3.5" />
         </Link>
       </div>
 

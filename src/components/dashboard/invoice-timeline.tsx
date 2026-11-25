@@ -2,9 +2,7 @@
 
 import { useMemo, useState } from 'react'
 import Link from 'next/link'
-import { ArrowUpRight } from 'lucide-react'
-
-import { ChartBarIcon } from '@/components/ui/icons'
+import { ChartBarIcon, ExternalLinkIcon } from '@/components/ui/icons'
 import { formatCurrency, type DashboardReceipt, type InvoiceRow } from '@/lib/dashboard'
 import {
   TIMELINE_SERIES,
@@ -202,7 +200,7 @@ export function InvoiceTimeline({ proforma, tax, receipts }: InvoiceTimelineProp
                 </span>
                 <span className="flex items-center gap-1 text-xs font-medium tabular-nums text-slate-700">
                   {formatValue(timeline.totals[series.key])}
-                  <ArrowUpRight className="h-3.5 w-3.5 text-slate-300 transition group-hover:text-brand-600" />
+                  <ExternalLinkIcon className="h-3.5 w-3.5 text-slate-300 transition group-hover:text-brand-600" />
                 </span>
               </Link>
             ))}
@@ -225,7 +223,7 @@ export function InvoiceTimeline({ proforma, tax, receipts }: InvoiceTimelineProp
                     className="group inline-flex items-center gap-1 text-xs font-semibold text-slate-800 hover:text-brand-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
                   >
                     {series.label}
-                    <ArrowUpRight className="h-3.5 w-3.5 text-slate-300 transition group-hover:text-brand-600" />
+                    <ExternalLinkIcon className="h-3.5 w-3.5 text-slate-300 transition group-hover:text-brand-600" />
                   </Link>
                   <span
                     className="h-2.5 w-2.5 shrink-0 rounded-sm"

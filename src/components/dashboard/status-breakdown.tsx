@@ -2,9 +2,7 @@
 
 import { useMemo } from 'react'
 import Link from 'next/link'
-import { ArrowUpRight } from 'lucide-react'
-
-import { InboxIcon } from '@/components/ui/icons'
+import { ExternalLinkIcon, InboxIcon } from '@/components/ui/icons'
 import type { DashboardArticle, StatusMasterRow } from '@/lib/dashboard'
 
 type StatusRow = {
@@ -42,7 +40,7 @@ export function StatusBreakdown({ articles, statuses }: StatusBreakdownProps) {
           className="inline-flex shrink-0 items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium text-brand-700 transition hover:bg-brand-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
         >
           Open
-          <ArrowUpRight className="h-3.5 w-3.5" />
+          <ExternalLinkIcon className="h-3.5 w-3.5" />
         </Link>
       </div>
 

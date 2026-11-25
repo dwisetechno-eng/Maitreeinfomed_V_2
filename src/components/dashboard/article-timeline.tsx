@@ -2,9 +2,7 @@
 
 import { useMemo, useState } from 'react'
 import Link from 'next/link'
-import { ArrowLeft, ArrowUpRight } from 'lucide-react'
-
-import { ChartBarIcon } from '@/components/ui/icons'
+import { ArrowLeftIcon, ChartBarIcon, ExternalLinkIcon } from '@/components/ui/icons'
 import {
   addMonthsUtc,
   monthKey,
@@ -79,7 +77,7 @@ export function ArticleTimeline({ articles, departments, clients }: ArticleTimel
                 aria-label="Back to monthly view"
                 title="Back to months"
               >
-                <ArrowLeft className="h-4 w-4" />
+                <ArrowLeftIcon className="h-4 w-4" />
               </button>
             )}
             <h2 className="text-sm font-semibold text-slate-900">
@@ -100,7 +98,7 @@ export function ArticleTimeline({ articles, departments, clients }: ArticleTimel
               className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium text-brand-700 transition hover:bg-brand-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
             >
               Open month
-              <ArrowUpRight className="h-3.5 w-3.5" />
+              <ExternalLinkIcon className="h-3.5 w-3.5" />
             </Link>
           )}
           <div
